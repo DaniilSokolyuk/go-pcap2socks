@@ -12,14 +12,14 @@ func SendGratuitousArp(localIP net.IP, localMAC net.HardwareAddr) ([]byte, error
 	ethernet := &layers.Ethernet{
 		SrcMAC:       localMAC,
 		DstMAC:       layers.EthernetBroadcast,
-		EthernetType: layers.EthernetTypeARP,
+		EthernetType: layers.EthernetTypeIPv4,
 	}
 	arp := &layers.ARP{
 		AddrType:          layers.LinkTypeEthernet,
 		Protocol:          layers.EthernetTypeIPv4,
 		HwAddressSize:     6,
 		ProtAddressSize:   4,
-		Operation:         layers.ARPRequest,
+		Operation:         layers.ARPReply,
 		SourceHwAddress:   localMAC,
 		SourceProtAddress: localIP,
 		DstHwAddress:      layers.EthernetBroadcast,
