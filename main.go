@@ -172,7 +172,7 @@ func (c Engine) Write(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
-	fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
+	//fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
 	return len(p), nil
 }
 
