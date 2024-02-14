@@ -34,6 +34,8 @@ type Config struct {
 	Options []option.Option
 }
 
+var NicID tcpip.NICID
+
 // CreateStack creates *stack.Stack with given config.
 func CreateStack(cfg *Config) (*stack.Stack, error) {
 	opts := []option.Option{option.WithDefault()}
@@ -56,7 +58,7 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 	})
 
 	// Generate unique NIC id.
-	nicID := tcpip.NICID(s.UniqueID())
+	NicID = tcpip.NICID(s.UniqueID())
 
 	opts = append(opts,
 		// Important: We must initiate transport protocol handlers
@@ -67,7 +69,7 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 		withUDPHandler(cfg.TransportHandler.HandleUDP),
 
 		// Create stack NIC and then bind link endpoint to it.
-		withCreatingNIC(nicID, cfg.LinkEndpoint),
+		withCreatingNIC(NicID, cfg.LinkEndpoint),
 
 		// In the past we did s.AddAddressRange to assign 0.0.0.0/0
 		// onto the interface. We need that to be able to terminate
@@ -76,7 +78,7 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 		// Promiscuous mode. https://github.com/google/gvisor/issues/3876
 		//
 		// Ref: https://github.com/cloudflare/slirpnetstack/blob/master/stack.go
-		withPromiscuousMode(nicID, nicPromiscuousModeEnabled),
+		withPromiscuousMode(NicID, nicPromiscuousModeEnabled),
 
 		// Enable spoofing if a stack may send packets from unowned
 		// addresses. This change required changes to some netgophers
@@ -90,14 +92,14 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 		// packets), we need to enable spoofing.
 		//
 		// Ref: https://github.com/google/gvisor/commit/8c0701462a84ff77e602f1626aec49479c308127
-		withSpoofing(nicID, nicSpoofingEnabled),
+		withSpoofing(NicID, nicSpoofingEnabled),
 
 		// Add default route table for IPv4 and IPv6. This will handle
 		// all incoming ICMP packets.
-		withRouteTable(nicID),
+		withRouteTable(NicID),
 
 		// Add default NIC to the given multicast groups.
-		withMulticastGroups(nicID, cfg.MulticastGroups),
+		withMulticastGroups(NicID, cfg.MulticastGroups),
 	)
 
 	for _, opt := range opts {

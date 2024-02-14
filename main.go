@@ -12,6 +12,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/jackpal/gateway"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"log/slog"
@@ -131,6 +132,7 @@ func (c Engine) Read(dst []byte) (n int, err error) {
 	ethProtocol := header.Ethernet(data)
 	switch ethProtocol.Type() {
 	case header.IPv4ProtocolNumber:
+		//fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
 		ipProtocol := header.IPv4(data[14:])
 		srcAddress := ipProtocol.SourceAddress()
 		if !c.LocalNetwork.Contains(srcAddress.AsSlice()) {
@@ -170,7 +172,7 @@ func (c Engine) Write(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
-	//fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
+	fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
 	return len(p), nil
 }
 
@@ -183,6 +185,8 @@ func (c Engine) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
 	if _, ok := c.ipMacTable[string(srcIP)]; !ok {
 		slog.Info(fmt.Sprintf("Device %s (%s) joined the network", srcIP, srcMAC))
 		c.ipMacTable[string(srcIP)] = srcMAC
+		// after restart app some devices doesnt react to GratuitousArp, so we need to add them manually
+		_defaultStack.AddStaticNeighbor(core.NicID, header.IPv4ProtocolNumber, tcpip.AddrFrom4Slice(srcIP), tcpip.LinkAddress(srcMAC))
 	}
 }
 
