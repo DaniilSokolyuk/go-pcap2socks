@@ -1,4 +1,4 @@
-package arp
+package arpr
 
 import (
 	"fmt"
@@ -19,10 +19,10 @@ func SendGratuitousArp(localIP net.IP, localMAC net.HardwareAddr) ([]byte, error
 		Protocol:          layers.EthernetTypeIPv4,
 		HwAddressSize:     6,
 		ProtAddressSize:   4,
-		Operation:         layers.ARPReply,
+		Operation:         layers.ARPRequest,
 		SourceHwAddress:   localMAC,
 		SourceProtAddress: localIP,
-		DstHwAddress:      layers.EthernetBroadcast,
+		DstHwAddress:      net.HardwareAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 		DstProtAddress:    localIP,
 	}
 

@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
+	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
 	"net"
 
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -44,6 +45,7 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 		NetworkProtocols: []stack.NetworkProtocolFactory{
 			ipv4.NewProtocol,
 			ipv6.NewProtocol,
+			arp.NewProtocol,
 		},
 		TransportProtocols: []stack.TransportProtocolFactory{
 			tcp.NewProtocol,

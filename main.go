@@ -8,12 +8,13 @@ import (
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
 	"github.com/jackpal/gateway"
+	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"log/slog"
 	"net"
 	"sync"
 
-	"github.com/DaniilSokolyuk/go-pcap2socks/arp"
+	"github.com/DaniilSokolyuk/go-pcap2socks/arpr"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -24,6 +25,8 @@ func main() {
 }
 
 func run() error {
+	ifce, dev := findDevInterface()
+
 	var err error
 	_defaultProxy, err = proxy.NewSocks5("127.0.0.1:1080", "", "")
 	if err != nil {
@@ -31,8 +34,6 @@ func run() error {
 
 	}
 	proxy.SetDialer(_defaultProxy)
-
-	ifce, dev := findDevInterface()
 
 	pcaph, err := pcap.OpenLive(dev.Name, 1600, true, pcap.BlockForever)
 	if err != nil {
@@ -64,7 +65,7 @@ func run() error {
 
 	go func() {
 		//sleep for 1 second to wait for the stack to be ready
-		reply, err := arp.SendGratuitousArp(engine.LocalIP, engine.LocalMAC)
+		reply, err := arpr.SendGratuitousArp(engine.LocalIP, engine.LocalMAC)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -97,20 +98,20 @@ func run() error {
 			if bytes.Compare(srcIP, engine.LocalIP) != 0 &&
 				bytes.Compare(dstIP, engine.LocalIP) == 0 &&
 				engine.LocalNetwork.Contains(srcIP) {
-				reply, err := arp.SendReply(arpLayer, engine.LocalIP, engine.LocalMAC)
+				reply, err := arpr.SendReply(arpLayer, engine.LocalIP, engine.LocalMAC)
 				if err != nil {
 					fmt.Println(err)
 					continue
 				}
 
-				engine.ipMacTable[string(srcIP)] = arpLayer.SourceHwAddress
+				engine.SetHardwareAddr(srcIP, arpLayer.SourceHwAddress)
 
 				err = pcaph.WritePacketData(reply)
 				if err != nil {
 					fmt.Println(err)
 				}
 
-				slog.Info("arp reply sent to %s", srcIP)
+				slog.Info("ARP reply sent", "src", srcIP, "dst", dstIP)
 			}
 		}
 
@@ -119,9 +120,10 @@ func run() error {
 		ipv4Layer, isIpV4 := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
 		if isIpV4 && engine.LocalNetwork.Contains(ipv4Layer.SrcIP) {
 			// restart app case
-			engine.ipMacTable[string(ipv4Layer.SrcIP)] = ethernetLayer.SrcMAC
+			if isIpV4 {
+				engine.SetHardwareAddr(ipv4Layer.SrcIP, ethernetLayer.SrcMAC)
+			}
 
-			//fmt.Println(packet.String())
 			engine.readCh <- ethernetLayer.Payload
 		}
 	}
@@ -154,7 +156,18 @@ type Engine struct {
 }
 
 func (c Engine) Read(p []byte) (n int, err error) {
-	data := <-c.readCh
+	data, _, err := c.handle.ZeroCopyReadPacketData()
+	if err != nil {
+		slog.Error("read packet error: %w", err)
+	}
+
+	ethProtocol := header.Ethernet(data)
+	switch ethProtocol.Type() {
+	case header.IPv4ProtocolNumber:
+	case header.ARPProtocolNumber:
+
+	}
+
 	copy(p, data)
 	return len(data), nil
 }
@@ -198,6 +211,14 @@ func (c Engine) Write(p []byte) (n int, err error) {
 func (c Engine) Close() error {
 	c.handle.Close()
 	return nil
+}
+
+func (c Engine) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
+	if _, ok := c.ipMacTable[string(srcIP)]; !ok {
+		slog.Info(fmt.Sprintf("Device %s (%s) joined the network", srcIP, srcMAC))
+		c.ipMacTable[string(srcIP)] = srcMAC
+	}
+
 }
 
 func findDevInterface() (net.Interface, pcap.Interface) {
