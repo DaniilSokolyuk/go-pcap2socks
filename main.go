@@ -149,6 +149,7 @@ func (c Engine) Read(dst []byte) (n int, err error) {
 		srcIP := net.IP(arpLayer.SourceProtAddress)
 		dstIP := net.IP(arpLayer.DstProtAddress)
 		// //gvisor handle arp requests, but we should filter out arp requests from the expected network
+		// cant use gvisor check due spoofing
 		if bytes.Compare(srcIP, c.LocalIP) != 0 &&
 			bytes.Compare(dstIP, c.LocalIP) == 0 &&
 			c.LocalNetwork.Contains(srcIP) {
