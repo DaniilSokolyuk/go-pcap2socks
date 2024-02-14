@@ -3,25 +3,34 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/DaniilSokolyuk/go-pcap2socks/arpr"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 	"github.com/jackpal/gateway"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"log/slog"
 	"net"
+	"os"
+	"os/signal"
 	"sync"
-
-	"github.com/DaniilSokolyuk/go-pcap2socks/arpr"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
+	"syscall"
 )
 
 func main() {
-	run()
+	err := run()
+	if err != nil {
+		slog.Error("run error: %w", err)
+	}
+
+	quitChannel := make(chan os.Signal)
+	signal.Notify(quitChannel, syscall.SIGINT, syscall.SIGTERM)
+	<-quitChannel
 }
 
 func run() error {
@@ -40,10 +49,6 @@ func run() error {
 		return fmt.Errorf("open live error: %w", err)
 	}
 
-	packetSource := gopacket.NewPacketSource(pcaph, pcaph.LinkType())
-	packetSource.DecodeOptions = gopacket.DecodeOptions{Lazy: true, NoCopy: true}
-	packets := packetSource.Packets()
-
 	network := net.IPNet{
 		IP:   net.ParseIP("172.24.2.1"),
 		Mask: net.CIDRMask(24, 32),
@@ -55,7 +60,6 @@ func run() error {
 		LocalNetwork: network,
 		LocalIP:      network.IP.To4(),
 		LocalMAC:     net.HardwareAddr{0xde, 0xad, 0xbe, 0xee, 0xee, 0xef},
-		readCh:       make(chan []byte),
 		handle:       pcaph,
 		ipMacTable:   make(map[string]net.HardwareAddr),
 	}
@@ -90,44 +94,6 @@ func run() error {
 		slog.Error("create stack error: %w", err)
 	}
 
-	for packet := range packets {
-		arpLayer, isArp := packet.Layer(layers.LayerTypeARP).(*layers.ARP)
-		if isArp {
-			srcIP := net.IP(arpLayer.SourceProtAddress)
-			dstIP := net.IP(arpLayer.DstProtAddress)
-			if bytes.Compare(srcIP, engine.LocalIP) != 0 &&
-				bytes.Compare(dstIP, engine.LocalIP) == 0 &&
-				engine.LocalNetwork.Contains(srcIP) {
-				reply, err := arpr.SendReply(arpLayer, engine.LocalIP, engine.LocalMAC)
-				if err != nil {
-					fmt.Println(err)
-					continue
-				}
-
-				engine.SetHardwareAddr(srcIP, arpLayer.SourceHwAddress)
-
-				err = pcaph.WritePacketData(reply)
-				if err != nil {
-					fmt.Println(err)
-				}
-
-				slog.Info("ARP reply sent", "src", srcIP, "dst", dstIP)
-			}
-		}
-
-		//ethernetLayer := packet.Layer(layers.LayerTypeEthernet).(*layers.Ethernet)
-		ethernetLayer, _ := packet.Layer(layers.LayerTypeEthernet).(*layers.Ethernet)
-		ipv4Layer, isIpV4 := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
-		if isIpV4 && engine.LocalNetwork.Contains(ipv4Layer.SrcIP) {
-			// restart app case
-			if isIpV4 {
-				engine.SetHardwareAddr(ipv4Layer.SrcIP, ethernetLayer.SrcMAC)
-			}
-
-			engine.readCh <- ethernetLayer.Payload
-		}
-	}
-
 	return nil
 }
 
@@ -155,57 +121,57 @@ type Engine struct {
 	Name         string
 }
 
-func (c Engine) Read(p []byte) (n int, err error) {
+func (c Engine) Read(dst []byte) (n int, err error) {
 	data, _, err := c.handle.ZeroCopyReadPacketData()
 	if err != nil {
 		slog.Error("read packet error: %w", err)
+		return 0, nil
 	}
 
 	ethProtocol := header.Ethernet(data)
 	switch ethProtocol.Type() {
 	case header.IPv4ProtocolNumber:
+		ipProtocol := header.IPv4(data[14:])
+		srcAddress := ipProtocol.SourceAddress()
+		if !c.LocalNetwork.Contains(srcAddress.AsSlice()) {
+			return 0, nil
+		}
+		c.SetHardwareAddr(srcAddress.AsSlice(), []byte(ethProtocol.SourceAddress()))
 	case header.ARPProtocolNumber:
+		gPckt := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
+		arpLayer, isArp := gPckt.Layer(layers.LayerTypeARP).(*layers.ARP)
+		if !isArp {
+			return 0, nil
+		}
 
+		srcIP := net.IP(arpLayer.SourceProtAddress)
+		dstIP := net.IP(arpLayer.DstProtAddress)
+		// //gvisor handle arp requests, but we should filter out arp requests from the expected network
+		if bytes.Compare(srcIP, c.LocalIP) != 0 &&
+			bytes.Compare(dstIP, c.LocalIP) == 0 &&
+			c.LocalNetwork.Contains(srcIP) {
+			c.SetHardwareAddr(srcIP, arpLayer.SourceHwAddress)
+		} else {
+			return 0, nil
+		}
+
+	default:
+		return 0, nil
 	}
 
-	copy(p, data)
+	copy(dst, data)
 	return len(data), nil
 }
 
 func (c Engine) Write(p []byte) (n int, err error) {
-	dstIp := net.IP(p[16:20])
-
-	dstMac, ok := c.ipMacTable[string(dstIp)]
-	if !ok {
+	err = c.handle.WritePacketData(p)
+	if err != nil {
+		slog.Error("write packet error: %w", err)
 		return 0, nil
 	}
 
-	//add ethernet layer
-	ethernetResp := &layers.Ethernet{
-		SrcMAC:       c.LocalMAC,
-		DstMAC:       dstMac,
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	sbuf := gopacket.NewSerializeBuffer()
-	options := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-
-	if err := gopacket.SerializeLayers(sbuf, options, ethernetResp, gopacket.Payload(p)); err != nil {
-		panic(err)
-	}
-
-	bts := sbuf.Bytes()
-
-	err = c.handle.WritePacketData(bts)
-	if err != nil {
-		return 0, err
-	}
-
-	//	fmt.Println("==============================reply: " + gopacket.NewPacket(bts, layers.LayerTypeEthernet, gopacket.Default).String())
-	return len(bts), nil
+	//fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
+	return len(p), nil
 }
 
 func (c Engine) Close() error {
@@ -218,7 +184,6 @@ func (c Engine) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
 		slog.Info(fmt.Sprintf("Device %s (%s) joined the network", srcIP, srcMAC))
 		c.ipMacTable[string(srcIP)] = srcMAC
 	}
-
 }
 
 func findDevInterface() (net.Interface, pcap.Interface) {

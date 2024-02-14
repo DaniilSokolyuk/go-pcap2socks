@@ -120,12 +120,8 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 			Payload: buffer.MakeWithData(data[offset : offset+n]),
 		})
 
-		switch header.IPVersion(data[offset:]) {
-		case header.IPv4Version:
-			e.InjectInbound(header.IPv4ProtocolNumber, pkt)
-		case header.IPv6Version:
-			e.InjectInbound(header.IPv6ProtocolNumber, pkt)
-		}
+		e.InjectInbound(header.EthernetProtocolAll, pkt)
+
 		pkt.DecRef()
 	}
 }

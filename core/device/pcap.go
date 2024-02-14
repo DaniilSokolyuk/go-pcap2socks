@@ -3,13 +3,14 @@ package device
 import (
 	"fmt"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device/iobased"
+	"gvisor.dev/gvisor/pkg/tcpip/link/ethernet"
 	"io"
 	"net"
 	"sync"
 )
 
 type TUN struct {
-	*iobased.Endpoint
+	*ethernet.Endpoint
 
 	nt     io.ReadWriteCloser
 	mtu    uint32
@@ -18,6 +19,7 @@ type TUN struct {
 
 	rMutex sync.Mutex
 	wMutex sync.Mutex
+	ep     *iobased.Endpoint
 }
 
 const offset = 0
@@ -40,7 +42,8 @@ func Open(name string, mtu uint32, pcap io.ReadWriteCloser, mac net.HardwareAddr
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
-	t.Endpoint = ep
+	t.ep = ep
+	t.Endpoint = ethernet.New(ep)
 
 	return t, nil
 }
@@ -62,7 +65,7 @@ func (t *TUN) Name() string {
 }
 
 func (t *TUN) Close() error {
-	defer t.Endpoint.Close()
+	defer t.ep.Close()
 	return t.nt.Close()
 }
 
