@@ -99,8 +99,6 @@ func run() error {
 }
 
 var (
-	_engineMu sync.Mutex
-
 	// _defaultProxy holds the default proxy for the engine.
 	_defaultProxy proxy.Proxy
 
@@ -116,13 +114,15 @@ type Engine struct {
 	LocalIP      net.IP
 	LocalMAC     net.HardwareAddr
 	handle       *pcap.Handle
-	readCh       chan []byte
 	ipMacTable   map[string]net.HardwareAddr
 	Interface    net.Interface
 	Name         string
+	rMux         sync.Mutex
 }
 
-func (c Engine) Read(dst []byte) (n int, err error) {
+func (c *Engine) Read(dst []byte) (n int, err error) {
+	c.rMux.Lock()
+	defer c.rMux.Unlock()
 	data, _, err := c.handle.ZeroCopyReadPacketData()
 	if err != nil {
 		slog.Error("read packet error: %w", err)
@@ -166,7 +166,7 @@ func (c Engine) Read(dst []byte) (n int, err error) {
 	return len(data), nil
 }
 
-func (c Engine) Write(p []byte) (n int, err error) {
+func (c *Engine) Write(p []byte) (n int, err error) {
 	err = c.handle.WritePacketData(p)
 	if err != nil {
 		slog.Error("write packet error: %w", err)
@@ -177,12 +177,12 @@ func (c Engine) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func (c Engine) Close() error {
+func (c *Engine) Close() error {
 	c.handle.Close()
 	return nil
 }
 
-func (c Engine) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
+func (c *Engine) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
 	if _, ok := c.ipMacTable[string(srcIP)]; !ok {
 		slog.Info(fmt.Sprintf("Device %s (%s) joined the network", srcIP, srcMAC))
 		c.ipMacTable[string(srcIP)] = srcMAC

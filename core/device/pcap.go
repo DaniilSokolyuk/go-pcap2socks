@@ -43,21 +43,10 @@ func Open(name string, mtu uint32, pcap io.ReadWriteCloser, mac net.HardwareAddr
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
 	t.ep = ep
+	// we are in L2 and using ethernet header
 	t.Endpoint = ethernet.New(ep)
 
 	return t, nil
-}
-
-func (t *TUN) Read(packet []byte) (int, error) {
-	t.rMutex.Lock()
-	defer t.rMutex.Unlock()
-	return t.nt.Read(packet)
-}
-
-func (t *TUN) Write(packet []byte) (int, error) {
-	t.wMutex.Lock()
-	defer t.wMutex.Unlock()
-	return t.nt.Write(packet)
 }
 
 func (t *TUN) Name() string {
