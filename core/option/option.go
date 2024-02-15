@@ -2,6 +2,7 @@ package option
 
 import (
 	"fmt"
+	"runtime"
 
 	"golang.org/x/time/rate"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -250,6 +251,14 @@ func WithTCPSACKEnabled(v bool) Option {
 // WithTCPRecovery sets the recovery option for TCP.
 func WithTCPRecovery(v tcpip.TCPRecovery) Option {
 	return func(s *stack.Stack) error {
+		if runtime.GOOS == "windows" {
+			// See https://github.com/tailscale/tailscale/issues/9707
+			// Windows w/RACK performs poorly. ACKs do not appear to be handled in a
+			// timely manner, leading to spurious retransmissions and a reduced
+			// congestion window.
+			v = tcpip.TCPRecovery(0)
+		}
+
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &v); err != nil {
 			return fmt.Errorf("set TCP Recovery: %s", err)
 		}
