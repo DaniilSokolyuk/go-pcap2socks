@@ -117,8 +117,8 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 		}
 
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Payload: buffer.MakeWithData(data[offset : offset+n]),
-			//	IsForwardedPacket: true, //TODO research this
+			Payload:           buffer.MakeWithData(data[offset : offset+n]),
+			IsForwardedPacket: true, //TODO research this
 		})
 
 		e.InjectInbound(header.EthernetProtocolAll, pkt)

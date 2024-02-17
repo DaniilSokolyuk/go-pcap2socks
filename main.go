@@ -37,7 +37,7 @@ func run() error {
 
 	cidr := "172.24.2.1/24"
 
-	_defaultDevice, err = device.Open("pcap", cidr, func() device.Stacker {
+	_defaultDevice, err = device.Open("pcap", cidr, 0, func() device.Stacker {
 		return _defaultStack
 	})
 	if err != nil {

@@ -36,7 +36,7 @@ type PCAP struct {
 
 const offset = 0
 
-func Open(name string, cidr string, stacker func() Stacker) (_ Device, err error) {
+func Open(name string, cidr string, mtu uint32, stacker func() Stacker) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("open tun: %v", r)
@@ -55,6 +55,10 @@ func Open(name string, cidr string, stacker func() Stacker) (_ Device, err error
 		return nil, fmt.Errorf("parse cidr error: %w", err)
 	}
 
+	if mtu == 0 {
+		mtu = uint32(ifce.MTU)
+	}
+
 	t := &PCAP{
 		stacker:    stacker,
 		name:       name,
@@ -66,7 +70,7 @@ func Open(name string, cidr string, stacker func() Stacker) (_ Device, err error
 		ipMacTable: make(map[string]net.HardwareAddr),
 	}
 
-	ep, err := iobased.New(t, uint32(t.Interface.MTU), offset, t.localMAC)
+	ep, err := iobased.New(t, mtu, offset, t.localMAC)
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
