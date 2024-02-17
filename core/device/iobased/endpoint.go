@@ -28,13 +28,10 @@ type Endpoint struct {
 	*channel.Endpoint
 
 	// rw is the io.ReadWriter for reading and writing packets.
-	rw io.ReadWriter
+	rw ReadWriter
 
 	// mtu (maximum transmission unit) is the maximum size of a packet.
 	mtu uint32
-
-	// offset can be useful when perform TUN device I/O with TUN_PI enabled.
-	offset int
 
 	// once is used to perform the init action once when attaching.
 	once sync.Once
@@ -44,7 +41,7 @@ type Endpoint struct {
 }
 
 // New returns stack.LinkEndpoint(.*Endpoint) and error.
-func New(rw io.ReadWriter, mtu uint32, offset int, mac net.HardwareAddr) (*Endpoint, error) {
+func New(rw ReadWriter, mtu uint32, offset int, mac net.HardwareAddr) (*Endpoint, error) {
 	if mtu == 0 {
 		return nil, errors.New("MTU size is zero")
 	}
@@ -66,7 +63,6 @@ func New(rw io.ReadWriter, mtu uint32, offset int, mac net.HardwareAddr) (*Endpo
 		Endpoint: channel.New(defaultOutQueueLen, mtu, linkAddr),
 		rw:       rw,
 		mtu:      mtu,
-		offset:   offset,
 	}, nil
 }
 
@@ -98,17 +94,15 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 	// gracefully after (*Endpoint).dispatchLoop(context.CancelFunc) returns.
 	defer cancel()
 
-	offset, mtu := e.offset, int(e.mtu)
+	mtu := int(e.mtu)
 
 	for {
-		data := make([]byte, offset+mtu)
-
-		n, err := e.rw.Read(data)
-		if err != nil {
-			break
+		data := e.rw.Read()
+		if len(data) == 0 {
+			continue
 		}
 
-		if n == 0 || n > mtu {
+		if len(data) > mtu {
 			continue
 		}
 
@@ -117,8 +111,8 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 		}
 
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Payload:           buffer.MakeWithData(data[offset : offset+n]),
-			IsForwardedPacket: true, //TODO research this
+			Payload:           buffer.MakeWithData(data),
+			IsForwardedPacket: true,
 		})
 
 		e.InjectInbound(header.EthernetProtocolAll, pkt)
@@ -143,15 +137,16 @@ func (e *Endpoint) outboundLoop(ctx context.Context) {
 func (e *Endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 	defer pkt.DecRef()
 
-	buf := pkt.ToBuffer()
-	defer buf.Release()
-	if e.offset != 0 {
-		v := buffer.NewViewWithData(make([]byte, e.offset))
-		_ = buf.Prepend(v)
-	}
-
-	if _, err := e.rw.Write(buf.Flatten()); err != nil {
+	view := pkt.ToView()
+	defer view.Release()
+	_, err := view.WriteTo(e.rw)
+	if err != nil {
 		return &tcpip.ErrInvalidEndpointState{}
 	}
 	return nil
+}
+
+type ReadWriter interface {
+	io.Writer
+	Read() []byte
 }

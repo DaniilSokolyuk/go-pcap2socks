@@ -81,13 +81,13 @@ func Open(name string, cidr string, mtu uint32, stacker func() Stacker) (_ Devic
 	return t, nil
 }
 
-func (t *PCAP) Read(dst []byte) (n int, err error) {
+func (t *PCAP) Read() []byte {
 	t.rMux.Lock()
 	defer t.rMux.Unlock()
 	data, _, err := t.handle.ZeroCopyReadPacketData()
 	if err != nil {
 		slog.Error("read packet error: %w", err)
-		return 0, nil
+		return nil
 	}
 
 	ethProtocol := header.Ethernet(data)
@@ -97,14 +97,14 @@ func (t *PCAP) Read(dst []byte) (n int, err error) {
 		ipProtocol := header.IPv4(data[14:])
 		srcAddress := ipProtocol.SourceAddress()
 		if !t.network.Contains(srcAddress.AsSlice()) {
-			return 0, nil
+			return nil
 		}
 		t.SetHardwareAddr(srcAddress.AsSlice(), []byte(ethProtocol.SourceAddress()))
 	case header.ARPProtocolNumber:
 		gPckt := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 		arpLayer, isArp := gPckt.Layer(layers.LayerTypeARP).(*layers.ARP)
 		if !isArp {
-			return 0, nil
+			return nil
 		}
 
 		srcIP := net.IP(arpLayer.SourceProtAddress)
@@ -116,15 +116,14 @@ func (t *PCAP) Read(dst []byte) (n int, err error) {
 			t.network.Contains(srcIP) {
 			t.SetHardwareAddr(srcIP, arpLayer.SourceHwAddress)
 		} else {
-			return 0, nil
+			return nil
 		}
 
 	default:
-		return 0, nil
+		return nil
 	}
 
-	copy(dst, data)
-	return len(data), nil
+	return data
 }
 
 func (t *PCAP) Write(p []byte) (n int, err error) {
