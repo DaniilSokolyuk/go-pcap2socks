@@ -24,7 +24,7 @@ type PCAP struct {
 	name string
 	ep   *iobased.Endpoint
 
-	network    net.IPNet
+	network    *net.IPNet
 	localIP    net.IP
 	localMAC   net.HardwareAddr
 	handle     *pcap.Handle
@@ -36,7 +36,7 @@ type PCAP struct {
 
 const offset = 0
 
-func Open(name string, stacker func() Stacker) (_ Device, err error) {
+func Open(name string, cidr string, stacker func() Stacker) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("open tun: %v", r)
@@ -50,9 +50,9 @@ func Open(name string, stacker func() Stacker) (_ Device, err error) {
 		return nil, fmt.Errorf("open live error: %w", err)
 	}
 
-	network := net.IPNet{
-		IP:   net.ParseIP("172.24.2.1"),
-		Mask: net.CIDRMask(24, 32),
+	localIP, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, fmt.Errorf("parse cidr error: %w", err)
 	}
 
 	t := &PCAP{
@@ -60,7 +60,7 @@ func Open(name string, stacker func() Stacker) (_ Device, err error) {
 		name:       name,
 		Interface:  ifce,
 		network:    network,
-		localIP:    network.IP.To4(),
+		localIP:    localIP.To4(),
 		localMAC:   net.HardwareAddr{0xde, 0xad, 0xbe, 0xee, 0xee, 0xef},
 		handle:     pcaph,
 		ipMacTable: make(map[string]net.HardwareAddr),

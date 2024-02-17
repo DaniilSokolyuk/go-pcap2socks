@@ -31,7 +31,8 @@ type Config struct {
 
 	// Options are supplement options to apply settings
 	// for the internal stack.
-	Options []option.Option
+	Options     []option.Option
+	IPV4Network string
 }
 
 var NicID tcpip.NICID
@@ -94,12 +95,7 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 		// Ref: https://github.com/google/gvisor/commit/8c0701462a84ff77e602f1626aec49479c308127
 		withSpoofing(NicID, nicSpoofingEnabled),
 
-		// Add default route table for IPv4 and IPv6. This will handle
-		// all incoming ICMP packets.
-		withRouteTable(NicID),
-
-		// Add default NIC to the given multicast groups.
-		withMulticastGroups(NicID, cfg.MulticastGroups),
+		setupNetwork(NicID, cfg.IPV4Network),
 	)
 
 	for _, opt := range opts {

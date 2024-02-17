@@ -28,14 +28,16 @@ func main() {
 
 func run() error {
 	var err error
-	_defaultProxy, err = proxy.NewSocks5("127.0.0.1:1080", "", "")
+	_defaultProxy = proxy.NewDirect()
 	if err != nil {
 		return fmt.Errorf("new socks5 error: %w", err)
 
 	}
 	proxy.SetDialer(_defaultProxy)
 
-	_defaultDevice, err = device.Open("pcap", func() device.Stacker {
+	cidr := "172.24.2.1/24"
+
+	_defaultDevice, err = device.Open("pcap", cidr, func() device.Stacker {
 		return _defaultStack
 	})
 	if err != nil {
@@ -46,6 +48,7 @@ func run() error {
 		LinkEndpoint:     _defaultDevice,
 		TransportHandler: &core.Tunnel{},
 		MulticastGroups:  []net.IP{},
+		IPV4Network:      cidr,
 		Options:          []option.Option{},
 	}); err != nil {
 		slog.Error("create stack error: %w", err)
