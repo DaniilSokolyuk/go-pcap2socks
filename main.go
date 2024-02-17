@@ -28,7 +28,7 @@ func main() {
 
 func run() error {
 	var err error
-	_defaultProxy = proxy.NewDirect()
+	_defaultProxy, err = proxy.NewSocks5("127.0.0.1:1080", "", "")
 	if err != nil {
 		return fmt.Errorf("new socks5 error: %w", err)
 
