@@ -99,7 +99,9 @@ func (t *PCAP) Read() []byte {
 		if !t.network.Contains(srcAddress.AsSlice()) {
 			return nil
 		}
-		t.SetHardwareAddr(srcAddress.AsSlice(), []byte(ethProtocol.SourceAddress()))
+		if bytes.Compare(srcAddress.AsSlice(), t.localIP) != 0 {
+			t.SetHardwareAddr(srcAddress.AsSlice(), []byte(ethProtocol.SourceAddress()))
+		}
 	case header.ARPProtocolNumber:
 		gPckt := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 		arpLayer, isArp := gPckt.Layer(layers.LayerTypeARP).(*layers.ARP)
