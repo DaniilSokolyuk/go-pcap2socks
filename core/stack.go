@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
+	"github.com/DaniilSokolyuk/go-pcap2socks/tunnel"
 	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
 	"net"
 
@@ -67,7 +68,7 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 		// to stack and cause race condition.
 		// Initiate transport protocol (TCP/UDP) with given handler.
 		withTCPHandler(cfg.TransportHandler.HandleTCP),
-		withUDPHandler(cfg.TransportHandler.HandleUDP),
+		withUDPNatHandler(tunnel.HandleUDPConn),
 
 		// Create stack NIC and then bind link endpoint to it.
 		withCreatingNIC(NicID, cfg.LinkEndpoint),
@@ -95,7 +96,7 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 		// Ref: https://github.com/google/gvisor/commit/8c0701462a84ff77e602f1626aec49479c308127
 		withSpoofing(NicID, nicSpoofingEnabled),
 
-		setupNetwork(NicID, cfg.IPV4Network),
+		withRouteTable(NicID),
 	)
 
 	for _, opt := range opts {

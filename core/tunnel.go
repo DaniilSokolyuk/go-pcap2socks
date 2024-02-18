@@ -12,7 +12,3 @@ type Tunnel struct{}
 func (*Tunnel) HandleTCP(conn adapter.TCPConn) {
 	tunnel.TCPIn() <- conn
 }
-
-func (*Tunnel) HandleUDP(conn adapter.UDPConn) {
-	tunnel.UDPIn() <- conn
-}

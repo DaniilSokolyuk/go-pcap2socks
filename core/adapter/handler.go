@@ -4,5 +4,4 @@ package adapter
 // HandleTCP and HandleUDP methods.
 type TransportHandler interface {
 	HandleTCP(TCPConn)
-	HandleUDP(UDPConn)
 }
