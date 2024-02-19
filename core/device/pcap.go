@@ -45,14 +45,19 @@ func Open(name string, cidr string, mtu uint32, stacker func() Stacker) (_ Devic
 
 	ifce, dev := findDevInterface()
 
+	localIP, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, fmt.Errorf("parse cidr error: %w", err)
+	}
+
 	pcaph, err := pcap.OpenLive(dev.Name, 1600, true, pcap.BlockForever)
 	if err != nil {
 		return nil, fmt.Errorf("open live error: %w", err)
 	}
-
-	localIP, network, err := net.ParseCIDR(cidr)
+	//arp or src net 172.24.2.0/24 or ether dst de:ad:be:ee:ee:ef
+	err = pcaph.SetBPFFilter(fmt.Sprintf("arp or src net %s or ether dst %s", network.String(), "de:ad:be:ee:ee:ef"))
 	if err != nil {
-		return nil, fmt.Errorf("parse cidr error: %w", err)
+		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}
 
 	if mtu == 0 {
@@ -65,7 +70,7 @@ func Open(name string, cidr string, mtu uint32, stacker func() Stacker) (_ Devic
 		Interface:  ifce,
 		network:    network,
 		localIP:    localIP.To4(),
-		localMAC:   net.HardwareAddr{0xde, 0xad, 0xbe, 0xee, 0xee, 0xef},
+		localMAC:   net.HardwareAddr{0xde, 0xad, 0xbe, 0xee, 0xee, 0xef}, //de:ad:be:ee:ee:ef
 		handle:     pcaph,
 		ipMacTable: make(map[string]net.HardwareAddr),
 	}

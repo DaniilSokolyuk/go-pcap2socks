@@ -2,17 +2,16 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
-	"net"
-	"os"
-	"os/signal"
-	"syscall"
-
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
+	"log"
+	"log/slog"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -21,9 +20,10 @@ func main() {
 		slog.Error("run error: %w", err)
 	}
 
-	quitChannel := make(chan os.Signal)
-	signal.Notify(quitChannel, syscall.SIGINT, syscall.SIGTERM)
-	<-quitChannel
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Hello pperf!"))
+	})
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func run() error {

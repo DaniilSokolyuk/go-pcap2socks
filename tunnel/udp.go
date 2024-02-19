@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var UdpSessionTimeout = 60 * time.Minute
+var UdpSessionTimeout = 5 * time.Minute
 
 func HandleUDPConn(uc adapter.UDPConn) {
 	metadata := uc.MD()
@@ -23,69 +23,45 @@ func HandleUDPConn(uc adapter.UDPConn) {
 		slog.Warn("[UDP] dial error: ", "error", err)
 		return
 	}
+	defer pc.Close()
 
 	slog.Info("[UDP] Connection", "source", metadata.SourceAddress(), "dest", metadata.DestinationAddress())
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
-	go handleRemoteToLocal(pc, uc, &wg)
-	go handleLocalToRemote(uc, pc, &wg)
+	go pipeChannel(pc, uc, &wg)
+	go pipeChannel(uc, pc, &wg)
 	wg.Wait()
 
 	uc.Close()
 	slog.Info("[UDP] Connection closed", "source", metadata.SourceAddress(), "dest", metadata.DestinationAddress())
 }
 
-func handleRemoteToLocal(pc net.PacketConn, uc net.PacketConn, wg *sync.WaitGroup) {
+func pipeChannel(from net.PacketConn, to net.PacketConn, wg *sync.WaitGroup) {
 	defer wg.Done()
-	defer pc.Close()
 
 	buf := pool.Get(pool.MaxSegmentSize)
 	defer pool.Put(buf)
 
 	for {
-		pc.SetReadDeadline(time.Now().Add(UdpSessionTimeout))
-		n, dest, err := pc.ReadFrom(buf)
+		from.SetReadDeadline(time.Now().Add(UdpSessionTimeout))
+		n, dest, err := from.ReadFrom(buf)
 		if err != nil {
 			if errors.Is(err, io.ErrClosedPipe) {
-				slog.Warn("[UDP] pipe closed: %v", err)
+				slog.Warn("[UDP] pipe closed", "source", from.LocalAddr(), "dest", to.LocalAddr(), "error", err)
 				return
 			}
 			if !errors.Is(err, os.ErrDeadlineExceeded) {
-				slog.Warn("[UDP] read error: %v", err)
+				slog.Warn("[UDP] read error", "source", from.LocalAddr(), "dest", to.LocalAddr(), "error", err)
 			}
 
 			return
 		}
 
-		if _, err := uc.WriteTo(buf[:n], dest); err != nil {
-			slog.Warn("[UDP] write error", "source", uc.LocalAddr(), "dest", dest, "error", err)
-			return
-		}
-	}
-}
-
-func handleLocalToRemote(uc net.PacketConn, pc net.PacketConn, wg *sync.WaitGroup) {
-	defer wg.Done()
-	buf := pool.Get(pool.MaxSegmentSize)
-	defer pool.Put(buf)
-
-	for {
-		n, dest, err := uc.ReadFrom(buf)
-		if err != nil {
-			if errors.Is(err, io.ErrClosedPipe) {
-				slog.Warn("[UDP] pipe closed: %v", err)
-				return
-			}
-			if !errors.Is(err, os.ErrDeadlineExceeded) {
-				slog.Warn("[UDP] read error: %v", err)
-			}
-			return
-		}
-
-		if _, err := pc.WriteTo(buf[:n], dest); err != nil {
-			slog.Warn("[UDP] write error", "source", uc.LocalAddr(), "dest", dest, "error", err)
+		to.SetWriteDeadline(time.Now().Add(UdpSessionTimeout))
+		if _, err := to.WriteTo(buf[:n], dest); err != nil {
+			slog.Warn("[UDP] write error", "source", from.LocalAddr(), "dest", dest, "error", err)
 			return
 		}
 	}
