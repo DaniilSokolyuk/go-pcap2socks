@@ -33,14 +33,14 @@ func handleTCPConn(originConn adapter.TCPConn) {
 
 	remoteConn, err := proxy.Dial(metadata)
 	if err != nil {
-		slog.Warn("[TCP] dial %s: %v", metadata.DestinationAddress(), err)
+		slog.Warn("[TCP] Dial error", "dest", metadata.DestinationAddress(), "error", err)
 		return
 	}
 	metadata.MidIP, metadata.MidPort = parseAddr(remoteConn.LocalAddr())
 
 	defer remoteConn.Close()
 
-	log.Infof("[TCP] %s <-> %s", metadata.SourceAddress(), metadata.DestinationAddress())
+	slog.Info("[TCP] Connection", "source", metadata.SourceAddress(), "dest", metadata.DestinationAddress())
 	pipe(originConn, remoteConn)
 }
 

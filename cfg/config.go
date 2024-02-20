@@ -74,11 +74,12 @@ func (r *Rule) Normalize() {
 type Outbound struct {
 	Direct *OutboundDirect `json:"direct,omitempty"`
 	Socks  *OutboundSocks  `json:"socks,omitempty"`
+	Reject *OutboundReject `json:"reject,omitempty"`
 	Tag    string          `json:"tag,omitempty"`
 }
 
-type OutboundDirect struct {
-}
+type OutboundDirect struct{}
+type OutboundReject struct{}
 
 type OutboundSocks struct {
 	Address  string `json:"address"`

@@ -59,6 +59,8 @@ func run(cfg *cfg.Config) error {
 			if err != nil {
 				return fmt.Errorf("new socks5 error: %w", err)
 			}
+		case outbound.Reject != nil:
+			p = proxy.NewReject()
 		default:
 			return fmt.Errorf("invalid outbound: %+v", outbound)
 		}
