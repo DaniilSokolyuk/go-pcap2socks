@@ -32,8 +32,7 @@ type Config struct {
 
 	// Options are supplement options to apply settings
 	// for the internal stack.
-	Options     []option.Option
-	IPV4Network string
+	Options []option.Option
 }
 
 var NicID tcpip.NICID

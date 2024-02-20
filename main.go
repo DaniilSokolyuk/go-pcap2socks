@@ -2,42 +2,74 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+
+	//_ "net/http/pprof"
+
+	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"log"
-	"log/slog"
-	"net"
-	"net/http"
-	_ "net/http/pprof"
 )
 
 func main() {
-	err := run()
+	// get config file from first argument or use config.json
+	var cfgFile string
+	if len(os.Args) > 1 {
+		cfgFile = os.Args[1]
+	} else {
+		cfgFile = "config.json"
+	}
+
+	config, err := cfg.Load(cfgFile)
 	if err != nil {
-		slog.Error("run error: %w", err)
+		slog.Error("load config error", "file", cfgFile, "error", err)
+		return
+	}
+	slog.Info("Config loaded", "file", cfgFile)
+
+	err = run(config)
+	if err != nil {
+		slog.Error("run error", "error", err)
+		return
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello pperf!"))
+		w.Write([]byte("Hello world!"))
 	})
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func run() error {
+func run(cfg *cfg.Config) error {
+	proxies := make(map[string]proxy.Proxy)
 	var err error
-	_defaultProxy, err = proxy.NewSocks5("127.0.0.1:1080", "", "")
-	if err != nil {
-		return fmt.Errorf("new socks5 error: %w", err)
+	for _, outbound := range cfg.Outbounds {
+		var p proxy.Proxy
+		switch {
+		case outbound.Direct != nil:
+			p = proxy.NewDirect()
+		case outbound.Socks != nil:
+			p, err = proxy.NewSocks5(outbound.Socks.Address, outbound.Socks.Username, outbound.Socks.Password)
+			if err != nil {
+				return fmt.Errorf("new socks5 error: %w", err)
+			}
+		default:
+			return fmt.Errorf("invalid outbound: %+v", outbound)
+		}
 
+		proxies[outbound.Tag] = p
 	}
+
+	_defaultProxy = proxy.NewRouter(cfg.Routing.Rules, proxies)
 	proxy.SetDialer(_defaultProxy)
 
-	cidr := "172.24.2.1/24"
-
-	_defaultDevice, err = device.Open("pcap", cidr, 0, func() device.Stacker {
+	_defaultDevice, err = device.Open(cfg.PCAP, func() device.Stacker {
 		return _defaultStack
 	})
 	if err != nil {
@@ -48,7 +80,6 @@ func run() error {
 		LinkEndpoint:     _defaultDevice,
 		TransportHandler: &core.Tunnel{},
 		MulticastGroups:  []net.IP{},
-		IPV4Network:      cidr,
 		Options:          []option.Option{},
 	}); err != nil {
 		slog.Error("create stack error: %w", err)
