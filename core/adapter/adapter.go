@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	M "github.com/DaniilSokolyuk/go-pcap2socks/md"
 	"net"
 
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
@@ -16,9 +17,7 @@ type TCPConn interface {
 
 // UDPConn implements net.Conn and net.PacketConn.
 type UDPConn interface {
-	net.Conn
 	net.PacketConn
 
-	// ID returns the transport endpoint id of UDPConn.
-	ID() *stack.TransportEndpointID
+	MD() *M.Metadata
 }

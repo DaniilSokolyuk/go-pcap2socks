@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device/iobased"
 	"github.com/google/gopacket"
@@ -36,36 +37,64 @@ type PCAP struct {
 
 const offset = 0
 
-func Open(name string, cidr string, mtu uint32, stacker func() Stacker) (_ Device, err error) {
+func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("open tun: %v", r)
 		}
 	}()
 
-	ifce, dev := findDevInterface()
+	ifce, dev := findDevInterface(cfg.InterfaceGateway)
+	slog.Info("Using ethernet interface", "interface", ifce.Name, "name", dev.Name)
+
+	_, network, err := net.ParseCIDR(cfg.Network)
+	if err != nil {
+		return nil, fmt.Errorf("parse cidr error: %w", err)
+	}
+
+	localIP := net.ParseIP(cfg.LocalIP)
+	if localIP == nil {
+		return nil, fmt.Errorf("parse local ip error: %w", err)
+	}
+
+	localIP = localIP.To4()
+	if !network.Contains(localIP) {
+		return nil, fmt.Errorf("local ip (%s) not in network (%s)", localIP, network)
+	}
+
+	localMAC, err := net.ParseMAC(cfg.LocalMAC)
+	if localMAC == nil {
+		return nil, fmt.Errorf("parse local mac error: %w", err)
+	}
+
+	slog.Default().Info("Enter this settings in your device's network settings",
+		"ip", network.String(),
+		"mask", net.IP(network.Mask).String(),
+		"gateway", localIP.String())
 
 	pcaph, err := pcap.OpenLive(dev.Name, 1600, true, pcap.BlockForever)
 	if err != nil {
 		return nil, fmt.Errorf("open live error: %w", err)
 	}
 
-	localIP, network, err := net.ParseCIDR(cidr)
+	//arp or src net 172.24.2.0/24 or ether dst de:ad:be:ee:ee:ef
+	err = pcaph.SetBPFFilter(fmt.Sprintf("arp or src net %s or ether dst %s", network.String(), localMAC.String()))
 	if err != nil {
-		return nil, fmt.Errorf("parse cidr error: %w", err)
+		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}
 
+	mtu := cfg.MTU
 	if mtu == 0 {
 		mtu = uint32(ifce.MTU)
 	}
 
 	t := &PCAP{
+		name:       "dspcap",
 		stacker:    stacker,
-		name:       name,
 		Interface:  ifce,
 		network:    network,
-		localIP:    localIP.To4(),
-		localMAC:   net.HardwareAddr{0xde, 0xad, 0xbe, 0xee, 0xee, 0xef},
+		localIP:    localIP,
+		localMAC:   localMAC,
 		handle:     pcaph,
 		ipMacTable: make(map[string]net.HardwareAddr),
 	}
@@ -93,7 +122,6 @@ func (t *PCAP) Read() []byte {
 	ethProtocol := header.Ethernet(data)
 	switch ethProtocol.Type() {
 	case header.IPv4ProtocolNumber:
-		//fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
 		ipProtocol := header.IPv4(data[14:])
 		srcAddress := ipProtocol.SourceAddress()
 		if !t.network.Contains(srcAddress.AsSlice()) {
@@ -162,10 +190,19 @@ func (t *PCAP) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
 	}
 }
 
-func findDevInterface() (net.Interface, pcap.Interface) {
-	gateway, err := gateway.DiscoverInterface()
-	if err != nil {
-		panic(err)
+func findDevInterface(cfgIfce string) (net.Interface, pcap.Interface) {
+	var targetIface net.IP
+	if cfgIfce != "" {
+		targetIface = net.ParseIP(cfgIfce)
+		if targetIface == nil {
+			panic(fmt.Errorf("parse ip error, %s", cfgIfce))
+		}
+	} else {
+		var err error
+		targetIface, err = gateway.DiscoverInterface()
+		if err != nil {
+			panic(fmt.Errorf("discover interface error: %w", err))
+		}
 	}
 
 	// Get a list of all interfaces.
@@ -191,7 +228,7 @@ func findDevInterface() (net.Interface, pcap.Interface) {
 		} else {
 			for _, a := range addrs {
 				if ipnet, ok := a.(*net.IPNet); ok {
-					if ip4 := ipnet.IP.To4(); ip4 != nil && bytes.Equal(ip4, gateway.To4()) {
+					if ip4 := ipnet.IP.To4(); ip4 != nil && bytes.Equal(ip4, targetIface.To4()) {
 						addr = &net.IPNet{
 							IP:   ip4,
 							Mask: ipnet.Mask[len(ipnet.Mask)-4:],
