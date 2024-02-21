@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/DaniilSokolyuk/go-pcap2socks/arpr"
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device/iobased"
@@ -111,6 +112,20 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 	t.ep = ep
 	// we are in L2 and using ethernet header
 	t.Endpoint = ethernet.New(ep)
+
+	// send gratuitous arp
+	{
+		arpGratuitous, err := arpr.SendGratuitousArp(localIP, localMAC)
+		if err != nil {
+			return nil, fmt.Errorf("send gratuitous arp error: %w", err)
+		}
+
+		err = t.handle.WritePacketData(arpGratuitous)
+		if err != nil {
+			return nil, fmt.Errorf("write packet error: %w", err)
+
+		}
+	}
 
 	return t, nil
 }
