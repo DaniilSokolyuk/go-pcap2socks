@@ -29,8 +29,9 @@ func Load(filePath string) (*Config, error) {
 }
 
 type Config struct {
-	PCAP    PCAP `json:"pcap"`
-	Routing struct {
+	ExecuteOnStart []string `json:"executeOnStart"`
+	PCAP           PCAP     `json:"pcap"`
+	Routing        struct {
 		Rules []Rule `json:"rules"`
 	} `json:"routing"`
 	Outbounds []Outbound `json:"outbounds"`

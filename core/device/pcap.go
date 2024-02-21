@@ -72,7 +72,12 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 		"mask", net.IP(network.Mask).String(),
 		"gateway", localIP.String())
 
-	pcaph, err := pcap.OpenLive(dev.Name, 1600, true, pcap.BlockForever)
+	pcaphInactive, err := createPcapHandle(dev)
+	if err != nil {
+		return nil, err
+	}
+
+	pcaph, err := pcaphInactive.Activate()
 	if err != nil {
 		return nil, fmt.Errorf("open live error: %w", err)
 	}
@@ -108,6 +113,40 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 	t.Endpoint = ethernet.New(ep)
 
 	return t, nil
+}
+
+func createPcapHandle(dev pcap.Interface) (*pcap.InactiveHandle, error) {
+	handle, err := pcap.NewInactiveHandle(dev.Name)
+	if err != nil {
+		return nil, fmt.Errorf("new inactive handle error: %w", err)
+	}
+
+	err = handle.SetPromisc(true)
+	if err != nil {
+		return nil, fmt.Errorf("set promisc error: %w", err)
+	}
+
+	err = handle.SetSnapLen(1600)
+	if err != nil {
+		return nil, fmt.Errorf("set snap len error: %w", err)
+	}
+
+	err = handle.SetTimeout(pcap.BlockForever)
+	if err != nil {
+		return nil, fmt.Errorf("set timeout error: %w", err)
+	}
+
+	err = handle.SetImmediateMode(true)
+	if err != nil {
+		return nil, fmt.Errorf("set immediate mode error: %w", err)
+	}
+
+	err = handle.SetBufferSize(512 * 1024)
+	if err != nil {
+		return nil, fmt.Errorf("set buffer size error: %w", err)
+	}
+
+	return handle, nil
 }
 
 func (t *PCAP) Read() []byte {

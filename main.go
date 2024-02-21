@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 
 	//_ "net/http/pprof"
 
@@ -33,6 +34,32 @@ func main() {
 		return
 	}
 	slog.Info("Config loaded", "file", cfgFile)
+
+	if len(config.ExecuteOnStart) > 0 {
+		slog.Info("Executing commands on start", "cmd", config.ExecuteOnStart)
+
+		var cmd *exec.Cmd
+		if len(config.ExecuteOnStart) > 1 {
+			cmd = exec.Command(config.ExecuteOnStart[0], config.ExecuteOnStart[1:]...)
+		} else {
+			cmd = exec.Command(config.ExecuteOnStart[0])
+		}
+
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		go func() {
+			err := cmd.Start()
+			if err != nil {
+				slog.Error("execute command error", "error", err)
+			}
+
+			err = cmd.Wait()
+			if err != nil {
+
+			}
+		}()
+	}
 
 	err = run(config)
 	if err != nil {

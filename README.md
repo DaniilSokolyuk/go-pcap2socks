@@ -8,6 +8,6 @@ go-pcap2socks functions like a router, allowing you to connect various devices s
 Config example is [here](https://github.com/DaniilSokolyuk/go-pcap2socks/blob/main/config.json)
 
 ## Credits
-- https://github.com/zhxie/pcap2socksm - Idea
+- https://github.com/zhxie/pcap2socks - Idea
 - https://github.com/xjasonlyu/tun2socks - Forked from
 - https://github.com/SagerNet/sing-box Full Cone NAT

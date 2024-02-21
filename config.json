@@ -1,4 +1,5 @@
 {
+  "executeOnStart": ["C:\\Users\\Danox\\Desktop\\GOPCAP\\out.exe"],
   "pcap": {
     "interfaceGateway": "",
     "mtu": 0,
