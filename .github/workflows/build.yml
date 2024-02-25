@@ -19,7 +19,7 @@ jobs:
         with:
           go-version: 1.22
           cache: true
-      - run: apt-get update && apt-get install -y libpcap-dev
+      - run: sudo apt-get install -y libpcap-dev
       - run: go mod tidy
       - run: go test -v ./...
       - uses: docker/login-action@v1
