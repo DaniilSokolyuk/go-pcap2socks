@@ -8,10 +8,10 @@ builds:
     - amd64
     - arm64
 nfpms:
-  - maintainer: Carlos A Becker <root@carlosbecker.dev>
+  - maintainer: Daniil Sokolyuk <danoov@gmail.com>
     description: Sample project.
-    homepage: https://github.com/caarlos0/tasktimer
-    license: MIT
+    homepage: https://github.com/DaniilSokolyuk/go-pcap2socks
+    license: GPL-3.0
     formats:
       - deb
       - rpm
