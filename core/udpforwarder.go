@@ -3,9 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"github.com/DaniilSokolyuk/go-pcap2socks/tunnel"
-	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/common/udpnat"
 	"log/slog"
 	"math"
 	"net"
@@ -13,6 +10,10 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/DaniilSokolyuk/go-pcap2socks/tunnel"
+	"github.com/sagernet/sing/common"
+	"github.com/sagernet/sing/common/udpnat"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
@@ -205,7 +206,7 @@ func (w *UDPBackWriter) WritePacket(packetBuffer *buf.Buffer, destination M.Sock
 		false,
 	)
 	if err != nil {
-		return fmt.Errorf("find route: %w", err)
+		return fmt.Errorf("find route: %s", err)
 	}
 	defer route.Release()
 
@@ -243,7 +244,7 @@ func (w *UDPBackWriter) WritePacket(packetBuffer *buf.Buffer, destination M.Sock
 
 	if err != nil {
 		route.Stats().UDP.PacketSendErrors.Increment()
-		return fmt.Errorf("write packet: %w", err)
+		return fmt.Errorf("write packet: %s", err)
 	}
 
 	route.Stats().UDP.PacketsSent.Increment()
