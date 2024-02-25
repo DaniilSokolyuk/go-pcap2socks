@@ -1,0 +1,42 @@
+{
+  "executeOnStart": ["C:\\Users\\Danox\\Desktop\\GOPCAP\\out.exe"],
+  "pcap": {
+    "interfaceGateway": "",
+    "mtu": 0,
+    "network": "172.24.0.0/16",
+    "localIP": "172.24.2.1",
+    "localMAC": "de:ad:be:ee:ee:ef"
+  },
+  "routing": {
+    "rules": [
+      {
+        "srcPort": "80,443,53,3544,1985,55960,4500,500,3075,1900,5355,5353",
+        "dstPort": "3074",
+        "outboundTag": "sout"
+      },
+      {
+        "srcIP": [
+          "172.24.0.0/16"
+        ],
+        "dstIP": [
+          "20.33.0.0/16",
+          "20.157.0.0/16",
+          "40.74.0.0/16",
+          "192.168.0.0/16"
+        ],
+        "outboundTag": "sout"
+      }
+    ]
+  },
+  "outbounds": [
+    {
+      "direct": {}
+    },
+    {
+      "tag": "sout",
+      "socks": {
+        "address": "127.0.0.1:1080"
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+project_name: go-pcap2socks
+builds:
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+nfpms:
+  - maintainer: Carlos A Becker <root@carlosbecker.dev>
+    description: Sample project.
+    homepage: https://github.com/caarlos0/tasktimer
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
