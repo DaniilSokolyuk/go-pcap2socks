@@ -3,12 +3,10 @@ builds:
   - env:
       - CGO_ENABLED=1
     goos:
-      - linux
       - darwin
       - windows
     goarch:
       - amd64
-      - arm
       - arm64
 nfpms:
   - maintainer: Daniil Sokolyuk <danoov@gmail.com>
