@@ -1,12 +1,12 @@
 project_name: go-pcap2socks
 builds:
-    goos:
-      - linux
-      - windows
-      - darwin
-    goarch:
-      - amd64
-      - arm64
+  goos:
+    - linux
+    - windows
+    - darwin
+  goarch:
+    - amd64
+    - arm64
 nfpms:
   - maintainer: Carlos A Becker <root@carlosbecker.dev>
     description: Sample project.
