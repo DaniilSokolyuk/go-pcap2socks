@@ -1,31 +1,32 @@
 name: build
 
 on:
-  push:
-    branches:
-      - 'master'
-    tags:
-      - 'v*'
   pull_request:
+  push:
+    # run only against tags
+    tags:
+      - "*"
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v2
+      - uses: actions/setup-go@v5
         with:
-          go-version: 1.22
-          cache: true
+          go-version: stable
       - run: sudo apt-get install -y libpcap-dev
       - run: go mod tidy
       - run: go test -v ./...
-      - uses: goreleaser/goreleaser-action@v2
-        if: success() && startsWith(github.ref, 'refs/tags/')
+      - uses: goreleaser/goreleaser-action@v5
         with:
+          distribution: goreleaser
           version: latest
-          args: release --rm-dist
+          args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
