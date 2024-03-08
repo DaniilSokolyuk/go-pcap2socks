@@ -134,7 +134,7 @@ func (e *Endpoint) outboundLoop(ctx context.Context) {
 }
 
 // writePacket writes outbound packets to the io.Writer.
-func (e *Endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
+func (e *Endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
 	defer pkt.DecRef()
 
 	view := pkt.ToView()
