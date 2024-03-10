@@ -19,3 +19,10 @@
 
 # Go workspace file
 go.work
+
+*.DS_Store
+.idea
+.vscode
+/build_assets
+*.zip
+*.tar.gz
