@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 
-	//_ "net/http/pprof"
+	_ "net/http/pprof"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
