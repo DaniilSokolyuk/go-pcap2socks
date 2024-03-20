@@ -126,7 +126,7 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 func (e *Endpoint) outboundLoop(ctx context.Context) {
 	for {
 		pkt := e.ReadContext(ctx)
-		if pkt.IsNil() {
+		if pkt == nil {
 			break
 		}
 		e.writePacket(pkt)
