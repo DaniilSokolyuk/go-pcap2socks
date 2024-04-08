@@ -10,7 +10,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.19.0
 	golang.org/x/time v0.5.0
-	gvisor.dev/gvisor v0.0.0-20240331093445-9d995324d058
+	gvisor.dev/gvisor v0.0.0-20240405191320-0878b34101b5
 )
 
 require (
@@ -18,6 +18,6 @@ require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	golang.org/x/net v0.22.0 // indirect
+	golang.org/x/net v0.24.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -1,19 +1,28 @@
 {
   "pcap": {
-    "interfaceGateway": "",
-    "mtu": 0,
     "network": "172.24.0.0/16",
-    "localIP": "172.24.2.1",
-    "localMAC": "de:ad:be:ee:ee:ef"
+    "localIP": "172.24.2.1"
   },
   "routing": {
-    "rules": []
+    "rules": [
+      {
+        "dstPort": "80,443,53",
+        "outboundTag": "dir"
+      }
+    ]
   },
   "outbounds": [
     {
+      "tag": "",
       "socks": {
-        "address": "127.0.0.1:1080"
+        "address": "83.166.242.110:18081",
+        "username": "",
+        "password": ""
       }
+    },
+    {
+      "tag": "dir",
+      "direct": {}
     }
   ]
 }

@@ -46,7 +46,7 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 	}()
 
 	ifce, dev := findDevInterface(cfg.InterfaceGateway)
-	slog.Info("Using ethernet interface", "interface", ifce.Name, "name", dev.Name)
+	slog.Info("Using ethernet interface", "interface", ifce.Name, "name", dev.Name, "mac", ifce.HardwareAddr.String())
 
 	_, network, err := net.ParseCIDR(cfg.Network)
 	if err != nil {
@@ -63,9 +63,14 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 		return nil, fmt.Errorf("local ip (%s) not in network (%s)", localIP, network)
 	}
 
-	localMAC, err := net.ParseMAC(cfg.LocalMAC)
-	if localMAC == nil {
-		return nil, fmt.Errorf("parse local mac error: %w", err)
+	var localMAC net.HardwareAddr
+	if cfg.LocalMAC != "" {
+		localMAC, err = net.ParseMAC(cfg.LocalMAC)
+		if localMAC == nil {
+			return nil, fmt.Errorf("parse local mac error: %w", err)
+		}
+	} else {
+		localMAC = ifce.HardwareAddr
 	}
 
 	slog.Default().Info("Enter this settings in your device's network settings",
@@ -83,8 +88,8 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 		return nil, fmt.Errorf("open live error: %w", err)
 	}
 
-	//arp or src net 172.24.2.0/24 or ether dst de:ad:be:ee:ee:ef
-	err = pcaph.SetBPFFilter(fmt.Sprintf("arp or src net %s or ether dst %s", network.String(), localMAC.String()))
+	//arp or src net 172.24.2.0/24
+	err = pcaph.SetBPFFilter(fmt.Sprintf("arp or src net %s", network.String()))
 	if err != nil {
 		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}

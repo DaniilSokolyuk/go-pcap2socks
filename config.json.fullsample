@@ -5,7 +5,7 @@
     "mtu": 0,
     "network": "172.24.0.0/16",
     "localIP": "172.24.2.1",
-    "localMAC": "de:ad:be:ee:ee:ef"
+    "localMAC": ""
   },
   "routing": {
     "rules": [
