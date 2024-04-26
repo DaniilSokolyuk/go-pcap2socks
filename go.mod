@@ -1,6 +1,6 @@
 module github.com/DaniilSokolyuk/go-pcap2socks
 
-go 1.22
+go 1.22.1
 
 require (
 	github.com/google/gopacket v1.1.19
@@ -10,7 +10,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.19.0
 	golang.org/x/time v0.5.0
-	gvisor.dev/gvisor v0.0.0-20240405191320-0878b34101b5
+	gvisor.dev/gvisor v0.0.0-20240426094201-993d8b0e2f6d
 )
 
 require (
