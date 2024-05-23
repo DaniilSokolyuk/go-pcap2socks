@@ -10,7 +10,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.20.0
 	golang.org/x/time v0.5.0
-	gvisor.dev/gvisor v0.0.0-20240508082918-5ade888e61e7
+	gvisor.dev/gvisor v0.0.0-20240521174809-5eedbf551134
 )
 
 require (
