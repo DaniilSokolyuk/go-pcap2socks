@@ -5,7 +5,7 @@ go 1.22.1
 require (
 	github.com/google/gopacket v1.1.19
 	github.com/jackpal/gateway v1.0.15
-	github.com/sagernet/sing v0.3.8
+	github.com/sagernet/sing v0.4.0
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.20.0
