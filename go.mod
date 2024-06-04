@@ -8,7 +8,7 @@ require (
 	github.com/sagernet/sing v0.3.8
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/atomic v1.11.0
-	golang.org/x/sys v0.20.0
+	golang.org/x/sys v0.21.0
 	golang.org/x/time v0.5.0
 	gvisor.dev/gvisor v0.0.0-20240521174809-5eedbf551134
 )
