@@ -23,7 +23,7 @@ jobs:
       - run: sudo apt-get install -y libpcap-dev
       - run: go mod tidy
       - run: go test -v ./...
-      - uses: goreleaser/goreleaser-action@v5
+      - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
