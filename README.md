@@ -11,5 +11,5 @@ Config example is [here](https://github.com/DaniilSokolyuk/go-pcap2socks/blob/ma
 
 ## Credits
 - https://github.com/zhxie/pcap2socks - Idea
-- https://github.com/xjasonlyu/tun2socks - Fork
+- https://github.com/xjasonlyu/tun2socks - socks5 client
 - https://github.com/SagerNet/sing-box Full Cone NAT
