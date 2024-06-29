@@ -230,10 +230,9 @@ func (t *PCAP) Name() string {
 	return t.name
 }
 
-func (t *PCAP) Close() error {
+func (t *PCAP) Close() {
 	defer t.ep.Close()
 	t.handle.Close()
-	return nil
 }
 
 func (t *PCAP) Type() string {

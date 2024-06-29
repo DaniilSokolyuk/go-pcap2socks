@@ -3,17 +3,12 @@ builds:
   - env:
       - CGO_ENABLED=1
     goos:
-      - darwin
       - windows
     goarch:
       - amd64
-      - arm64
+      - x86
 nfpms:
   - maintainer: Daniil Sokolyuk <danoov@gmail.com>
     description: Sample project.
     homepage: https://github.com/DaniilSokolyuk/go-pcap2socks
     license: GPL-3.0
-    formats:
-      - deb
-      - rpm
-      - apk
