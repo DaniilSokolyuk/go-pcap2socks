@@ -1,15 +1,16 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"log"
 	"log/slog"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/exec"
-
-	_ "net/http/pprof"
+	"path"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
@@ -19,13 +20,33 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
+//go:embed config.json
+var configData string
+
 func main() {
 	// get config file from first argument or use config.json
 	var cfgFile string
 	if len(os.Args) > 1 {
 		cfgFile = os.Args[1]
 	} else {
-		cfgFile = "config.json"
+		executable, err := os.Executable()
+		if err != nil {
+			slog.Error("get executable error", "error", err)
+			return
+		}
+
+		cfgFile = path.Join(path.Dir(executable), "config.json")
+	}
+
+	cfgExists := cfg.Exists(cfgFile)
+	if !cfgExists {
+		slog.Info("Config file not found, creating a new one", "file", cfgFile)
+		//path to near executable file
+		err := os.WriteFile(cfgFile, []byte(configData), 0666)
+		if err != nil {
+			slog.Error("write config error", "file", cfgFile, "error", err)
+			return
+		}
 	}
 
 	config, err := cfg.Load(cfgFile)

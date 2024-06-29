@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+func Exists(filePath string) bool {
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return false
+	}
+
+	return true
+}
+
 func Load(filePath string) (*Config, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
