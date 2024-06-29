@@ -7,7 +7,7 @@ builds:
     goos:
       - windows
     goarch:
-      - x86
+      - amd64
 nfpms:
   - maintainer: Daniil Sokolyuk <danoov@gmail.com>
     description: Sample project.
