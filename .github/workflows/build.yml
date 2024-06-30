@@ -32,15 +32,13 @@ jobs:
           export CC=arm-linux-gnueabi-gcc
           ./configure --host=arm-linux --with-pcap=linux
           make
-      - run: |
-          sudo apt-get install -y libpcap-dev
       - run: go mod tidy
       - run: go test -v ./...
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: build --id linux windows --clean --snapshot
+          args: build --id=linux --id=windows --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-darwin:
