@@ -19,9 +19,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+      - run: dpkg --add-architecture arm64
       - run: sudo apt-get install -y libpcap-dev
-      - run: sudo apt-get install -y libpcap-dev:arm64
       - run: sudo apt-get install -y g++-aarch64-linux-gnu
+      - run: sudo apt-get install -y libpcap-dev:arm64
       - run: go mod tidy
       - run: go test -v ./...
       - uses: goreleaser/goreleaser-action@v6
