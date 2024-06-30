@@ -3,16 +3,15 @@ name: build
 on:
   pull_request:
   push:
-    # run only against tags
     tags:
-      - "*"
+      - '*'
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-linux:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,13 +19,45 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - run: sudo apt-get install -y libpcap-dev
+      - name: install libpcap
+        run: sudo apt-get install -y libpcap-dev gcc bison flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf
+      - name: Set up libpcap-dev-arm64
+        env:
+          PCAPV: 1.10.1
+        run: |
+          cd /tmp
+          wget http://www.tcpdump.org/release/libpcap-$PCAPV.tar.gz
+          tar xvf libpcap-$PCAPV.tar.gz
+          mv libpcap-$PCAPV libpcap
+          cd libpcap
+          export CC=aarch64-linux-gnu-gcc
+          ./configure --host=aarch64-linux --with-pcap=linux
+          make
       - run: go mod tidy
       - run: go test -v ./...
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: build --id=linux --id=windows --clean --snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build-darwin:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: brew install libpcap
+      - run: go mod tidy
+      - run: go test -v ./...
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --id darwin --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
