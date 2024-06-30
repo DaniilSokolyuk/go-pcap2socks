@@ -3,7 +3,7 @@ module github.com/DaniilSokolyuk/go-pcap2socks
 go 1.22.1
 
 require (
-	github.com/google/gopacket v1.1.19
+	github.com/gopacket/gopacket v1.2.0
 	github.com/jackpal/gateway v1.0.15
 	github.com/sagernet/sing v0.4.1
 	github.com/stretchr/testify v1.9.0
