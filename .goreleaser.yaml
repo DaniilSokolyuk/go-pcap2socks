@@ -26,7 +26,8 @@ builds:
         goarch: arm64
         env:
           - CC=arm-linux-gnueabi-gcc
-          - CGO_LDFLAGS="-L/tmp/libpcap"
+          - CGO_CFLAGS="-arch arm64"
+          - CGO_LDFLAGS="-arch arm64 -L/tmp/libpcap"
   - #
     id: darwin
     goos:
