@@ -25,7 +25,7 @@ builds:
       - goos: linux
         goarch: arm64
         env:
-          - CC=aarch64-linux-gnu-gcc
+          - CC=arm-linux-gnueabi-gcc
   - #
     id: darwin
     goos:
