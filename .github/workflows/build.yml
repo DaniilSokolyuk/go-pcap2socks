@@ -39,7 +39,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --id=linux --id=windows --clean --snapshot
+          args: build --id=linux --id=windows --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-darwin:
@@ -58,6 +58,6 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --id darwin --clean --snapshot
+          args: build --id darwin --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
