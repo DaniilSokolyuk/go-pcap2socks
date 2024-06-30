@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu pkg-config-aarch64-linux-gnu
+      - run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
       - run: sudo apt-get install -y libpcap-dev
       - run: go mod tidy
       - run: go test -v ./...
