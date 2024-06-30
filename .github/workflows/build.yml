@@ -21,7 +21,7 @@ jobs:
           go-version: stable
       - name: install libpcap
         run: sudo apt-get install -y libpcap-dev gcc bison flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf
-      - name: Set up libpcap-dev
+      - name: Set up libpcap-dev-arm64
         env:
           PCAPV: 1.10.1
         run: |
@@ -39,7 +39,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: build --id=linux --id=windows --clean --snapshot
+          args: publish --id=linux --id=windows --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-darwin:
@@ -58,6 +58,6 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: build --id darwin --clean --snapshot
+          args: publish --id darwin --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
