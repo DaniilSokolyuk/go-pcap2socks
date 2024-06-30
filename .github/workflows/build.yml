@@ -3,6 +3,8 @@ name: build
 on:
   pull_request:
   push:
+    tags:
+      - '*'
 
 permissions:
   contents: write
@@ -24,7 +26,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: build --id linux --clean
+          args: build --id linux --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-darwin:
@@ -43,6 +45,6 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: build --id darwin --clean
+          args: build --id darwin --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
