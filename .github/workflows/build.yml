@@ -27,7 +27,8 @@ jobs:
           cd /tmp
           wget http://www.tcpdump.org/release/libpcap-$PCAPV.tar.gz
           tar xvf libpcap-$PCAPV.tar.gz
-          cd libpcap-$PCAPV
+          mv libpcap-$PCAPV libpcap
+          cd libpcap
           export CC=arm-linux-gnueabi-gcc
           ./configure --host=arm-linux --with-pcap=linux
           make
@@ -39,7 +40,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: build --id linux,windows --clean --snapshot
+          args: build --id linux windows --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-darwin:
