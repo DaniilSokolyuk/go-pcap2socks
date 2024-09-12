@@ -109,6 +109,8 @@ func run(cfg *cfg.Config) error {
 			}
 		case outbound.Reject != nil:
 			p = proxy.NewReject()
+		case outbound.DNS != nil:
+			p = proxy.NewDNS(cfg.DNS)
 		default:
 			return fmt.Errorf("invalid outbound: %+v", outbound)
 		}

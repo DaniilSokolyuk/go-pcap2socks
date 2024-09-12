@@ -1,18 +1,27 @@
 {
-  "executeOnStart": ["C:\\Users\\Danox\\Desktop\\GOPCAP\\out.exe"],
+  "executeOnStart": [
+    "C:\\Users\\Danox\\Desktop\\GOPCAP\\out.exe"
+  ],
   "pcap": {
-    "interfaceGateway": "",
+    "interfaceGateway": "192.168.1.42",
     "mtu": 0,
     "network": "172.24.0.0/16",
     "localIP": "172.24.2.1",
     "localMAC": ""
   },
+  "dns": {
+    "servers": [
+      {
+        "address": "1.1.1.1:53"
+      }
+    ]
+  },
   "routing": {
     "rules": [
       {
-        "srcPort": "80,443,53,3544,1985,55960,4500,500,3075,1900,5355,5353",
+        "srcPort": "80,443,3544,1985,55960,4500,500,3075,1900,5355,5353",
         "dstPort": "3074",
-        "outboundTag": "sout"
+        "outboundTag": "socks-out"
       },
       {
         "srcIP": [
@@ -24,7 +33,11 @@
           "40.74.0.0/16",
           "192.168.0.0/16"
         ],
-        "outboundTag": "sout"
+        "outboundTag": "socks-out"
+      },
+      {
+        "dstPort": "53",
+        "outboundTag": "dns-out"
       }
     ]
   },
@@ -33,10 +46,14 @@
       "direct": {}
     },
     {
-      "tag": "sout",
+      "tag": "socks-out",
       "socks": {
         "address": "127.0.0.1:1080"
       }
+    },
+    {
+      "tag": "dns-out",
+      "dns": {}
     }
   ]
 }

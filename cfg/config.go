@@ -39,6 +39,7 @@ func Load(filePath string) (*Config, error) {
 type Config struct {
 	ExecuteOnStart []string `json:"executeOnStart"`
 	PCAP           PCAP     `json:"pcap"`
+	DNS            DNS      `json:"dns"`
 	Routing        struct {
 		Rules []Rule `json:"rules"`
 	} `json:"routing"`
@@ -84,6 +85,7 @@ type Outbound struct {
 	Direct *OutboundDirect `json:"direct,omitempty"`
 	Socks  *OutboundSocks  `json:"socks,omitempty"`
 	Reject *OutboundReject `json:"reject,omitempty"`
+	DNS    *OutboundDNS    `json:"dns,omitempty"`
 	Tag    string          `json:"tag,omitempty"`
 }
 
@@ -94,6 +96,14 @@ type OutboundSocks struct {
 	Address  string `json:"address"`
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type OutboundDNS struct{}
+
+type DNS struct {
+	Servers []struct {
+		Address string `json:"address"`
+	}
 }
 
 func mustToNetIP(addrs []string) []net.IPNet {
