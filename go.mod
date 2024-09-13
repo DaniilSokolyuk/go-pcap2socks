@@ -5,6 +5,7 @@ go 1.23.1
 require (
 	github.com/gopacket/gopacket v1.3.0
 	github.com/jackpal/gateway v1.0.15
+	github.com/miekg/dns v1.1.62
 	github.com/sagernet/sing v0.4.2
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/atomic v1.11.0
@@ -16,7 +17,6 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/btree v1.1.2 // indirect
-	github.com/miekg/dns v1.1.61 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	golang.org/x/mod v0.21.0 // indirect

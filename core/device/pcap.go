@@ -174,7 +174,7 @@ func (t *PCAP) Read() []byte {
 	defer t.rMux.Unlock()
 	data, _, err := t.handle.ZeroCopyReadPacketData()
 	if err != nil {
-		slog.Error("read packet error: %w", err)
+		slog.Error("read packet error: %w", slog.Any("err", err))
 		return nil
 	}
 
@@ -218,7 +218,7 @@ func (t *PCAP) Read() []byte {
 func (t *PCAP) Write(p []byte) (n int, err error) {
 	err = t.handle.WritePacketData(p)
 	if err != nil {
-		slog.Error("write packet error: %w", err)
+		slog.Error("write packet error: %w", slog.Any("err", err))
 		return 0, nil
 	}
 

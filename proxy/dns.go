@@ -77,7 +77,7 @@ func (d *dnsConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
 	go func() {
 		r, _, err := d.dnsClient.Exchange(msg, d.cfg.Servers[0].Address)
 		if err != nil {
-			slog.Error("dns exchange %w", err)
+			slog.Error("dns exchange %w", slog.Any("err", err))
 			return
 		}
 

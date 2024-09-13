@@ -31,7 +31,7 @@ func main() {
 	} else {
 		executable, err := os.Executable()
 		if err != nil {
-			slog.Error("get executable error", "error", err)
+			slog.Error("get executable error", slog.Any("err", err))
 			return
 		}
 
@@ -44,14 +44,14 @@ func main() {
 		//path to near executable file
 		err := os.WriteFile(cfgFile, []byte(configData), 0666)
 		if err != nil {
-			slog.Error("write config error", "file", cfgFile, "error", err)
+			slog.Error("write config error", slog.Any("file", cfgFile), slog.Any("err", err))
 			return
 		}
 	}
 
 	config, err := cfg.Load(cfgFile)
 	if err != nil {
-		slog.Error("load config error", "file", cfgFile, "error", err)
+		slog.Error("load config error", slog.Any("file", cfgFile), slog.Any("err", err))
 		return
 	}
 	slog.Info("Config loaded", "file", cfgFile)
@@ -72,7 +72,7 @@ func main() {
 		go func() {
 			err := cmd.Start()
 			if err != nil {
-				slog.Error("execute command error", "error", err)
+				slog.Error("execute command error", slog.Any("err", err))
 			}
 
 			err = cmd.Wait()
@@ -84,7 +84,7 @@ func main() {
 
 	err = run(config)
 	if err != nil {
-		slog.Error("run error", "error", err)
+		slog.Error("run error", slog.Any("err", err))
 		return
 	}
 
@@ -134,7 +134,7 @@ func run(cfg *cfg.Config) error {
 		MulticastGroups:  []net.IP{},
 		Options:          []option.Option{},
 	}); err != nil {
-		slog.Error("create stack error: %w", err)
+		slog.Error("create stack error", slog.Any("err", err))
 	}
 
 	return nil

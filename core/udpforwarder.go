@@ -46,7 +46,7 @@ func (h handler) NewPacketConnection(ctx context.Context, conn N.PacketConn, met
 }
 
 func (h handler) NewError(ctx context.Context, err error) {
-	slog.Error("udp PacketConnection proxy error: ", err)
+	slog.Error("udp PacketConnection proxy error: ", slog.Any("err", err))
 }
 
 func CreateProxyHandler(a func(adapter.UDPConn)) Handler {
@@ -64,7 +64,7 @@ func (ph proxyHandler) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	buffer := buf.With(p)
 	destination, err := ph.conn.ReadPacket(buffer)
 	if err != nil {
-		slog.Error("udp read packet error: ", err)
+		slog.Error("udp read packet error: ", slog.Any("err", err))
 		return
 	}
 	n = buffer.Len()
@@ -80,7 +80,7 @@ func (ph proxyHandler) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	common.Must1(bf.Write(p))
 	err = ph.conn.WritePacket(bf, M.SocksaddrFromNet(addr).Unwrap())
 	if err != nil {
-		slog.Error("udp write packet error: ", err)
+		slog.Error("udp write packet error: ", slog.Any("err", err))
 		return 0, err
 	}
 
