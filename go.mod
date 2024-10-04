@@ -9,7 +9,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.22.0
-	golang.org/x/time v0.5.0
+	golang.org/x/time v0.7.0
 	gvisor.dev/gvisor v0.0.0-20240726212243-a2b0498dbe7d
 )
 
