@@ -2,9 +2,9 @@ package adapter
 
 import (
 	M "github.com/DaniilSokolyuk/go-pcap2socks/md"
-	"net"
-
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
+
+	"net"
 )
 
 // TCPConn implements the net.Conn interface.
