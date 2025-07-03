@@ -1,28 +1,31 @@
 {
   "pcap": {
-    "network": "172.24.0.0/16",
-    "localIP": "172.24.2.1"
+    "network": "172.26.0.0/16",
+    "localIP": "172.26.0.1"
+  },
+  "dns": {
+    "servers": [
+      {
+        "address": "8.8.8.8:53"
+      }
+    ]
   },
   "routing": {
     "rules": [
       {
-        "dstPort": "80,443,53",
-        "outboundTag": "dir"
+        "dstPort": "53",
+        "outboundTag": "dns-out"
       }
     ]
   },
   "outbounds": [
     {
       "tag": "",
-      "socks": {
-        "address": "83.166.242.110:18081",
-        "username": "",
-        "password": ""
-      }
+      "direct": {}
     },
     {
-      "tag": "dir",
-      "direct": {}
+      "tag": "dns-out",
+      "dns": {}
     }
   ]
 }

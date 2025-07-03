@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
+	localdns "github.com/DaniilSokolyuk/go-pcap2socks/dns"
 	M "github.com/DaniilSokolyuk/go-pcap2socks/md"
 	"github.com/miekg/dns"
 )
@@ -32,7 +33,7 @@ func NewDNS(cfg cfg.DNS) *DNS {
 	dnsClient.UDPSize = math.MaxUint16
 
 	return &DNS{
-		dnsClient: new(dns.Client),
+		dnsClient: dnsClient,
 		cfg:       cfg,
 	}
 }
@@ -75,13 +76,32 @@ func (d *dnsConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
 	}
 
 	go func() {
-		r, _, err := d.dnsClient.Exchange(msg, d.cfg.Servers[0].Address)
-		if err != nil {
-			slog.Error("dns exchange %w", slog.Any("err", err))
-			return
+		var response *dns.Msg
+		var lastErr error
+
+		for _, server := range d.cfg.Servers {
+			if server.Address == "local" {
+				localClient := localdns.NewLocalClient()
+				response, lastErr = localClient.Exchange(msg)
+				if lastErr == nil {
+					d.answerCh <- response
+					return
+				}
+				slog.Error("local dns exchange failed", slog.Any("err", lastErr))
+				continue
+			}
+
+			response, _, lastErr = d.dnsClient.Exchange(msg, server.Address)
+			if lastErr == nil {
+				d.answerCh <- response
+				return
+			}
+			slog.Error("dns exchange failed", slog.String("server", server.Address), slog.Any("err", lastErr))
 		}
 
-		d.answerCh <- r
+		if lastErr != nil {
+			slog.Error("all dns servers failed", slog.Any("err", lastErr))
+		}
 	}()
 
 	return len(b), nil
