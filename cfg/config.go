@@ -44,6 +44,7 @@ type Config struct {
 		Rules []Rule `json:"rules"`
 	} `json:"routing"`
 	Outbounds []Outbound `json:"outbounds"`
+	Capture   Capture    `json:"capture,omitempty"`
 }
 
 type PCAP struct {
@@ -104,6 +105,12 @@ type DNS struct {
 	Servers []struct {
 		Address string `json:"address"`
 	}
+}
+
+type Capture struct {
+	Enabled    bool   `json:"enabled"`
+	TargetIP   string `json:"targetIP"`
+	OutputFile string `json:"outputFile"`
 }
 
 func mustToNetIP(addrs []string) []net.IPNet {

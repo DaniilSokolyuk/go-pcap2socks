@@ -1,12 +1,13 @@
 {
   "pcap": {
+    "mtu": 1500,
     "network": "172.26.0.0/16",
     "localIP": "172.26.0.1"
   },
   "dns": {
     "servers": [
       {
-        "address": "8.8.8.8:53"
+        "address": "local"
       }
     ]
   },
@@ -27,5 +28,10 @@
       "tag": "dns-out",
       "dns": {}
     }
-  ]
+  ],
+  "capture": {
+    "enabled": true,
+    "targetIP": "172.26.0.5",
+    "outputFile": "debug-capture.pcap"
+  }
 }

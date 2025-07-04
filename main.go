@@ -24,6 +24,27 @@ import (
 var configData string
 
 func main() {
+	// Setup logging - check SLOG_LEVEL env var
+	logLevel := slog.LevelInfo // Default to debug
+	if lvl := os.Getenv("SLOG_LEVEL"); lvl != "" {
+		switch lvl {
+		case "debug", "DEBUG":
+			logLevel = slog.LevelDebug
+		case "info", "INFO":
+			logLevel = slog.LevelInfo
+		case "warn", "WARN":
+			logLevel = slog.LevelWarn
+		case "error", "ERROR":
+			logLevel = slog.LevelError
+		}
+	}
+
+	opts := &slog.HandlerOptions{
+		Level: logLevel,
+	}
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	slog.SetDefault(slog.New(handler))
+
 	// get config file from first argument or use config.json
 	var cfgFile string
 	if len(os.Args) > 1 {
@@ -121,7 +142,7 @@ func run(cfg *cfg.Config) error {
 	_defaultProxy = proxy.NewRouter(cfg.Routing.Rules, proxies)
 	proxy.SetDialer(_defaultProxy)
 
-	_defaultDevice, err = device.Open(cfg.PCAP, func() device.Stacker {
+	_defaultDevice, err = device.Open(cfg.PCAP, cfg.Capture, func() device.Stacker {
 		return _defaultStack
 	})
 	if err != nil {
