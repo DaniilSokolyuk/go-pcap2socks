@@ -30,7 +30,7 @@
     }
   ],
   "capture": {
-    "enabled": true,
+    "enabled": false,
     "targetIP": "172.26.0.5",
     "outputFile": "debug-capture.pcap"
   }

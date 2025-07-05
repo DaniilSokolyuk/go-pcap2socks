@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"os"
 	"sync"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/arpr"
@@ -15,7 +14,6 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
-	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/jackpal/gateway"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -39,8 +37,7 @@ type PCAP struct {
 	stacker    func() Stacker
 
 	// Debug PCAP capture
-	debugWriter   *pcapgo.Writer
-	debugTargetIP net.IP
+	debugCapture *DebugCapture
 }
 
 const offset = 0
@@ -126,36 +123,11 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, stacker func() Stacker) (_ D
 
 	// Setup PCAP capture if enabled
 	if captureCfg.Enabled && captureCfg.TargetIP != "" {
-		targetIP := net.ParseIP(captureCfg.TargetIP)
-		if targetIP != nil {
-			// Convert to IPv4 if needed
-			if v4 := targetIP.To4(); v4 != nil {
-				targetIP = v4
-			}
-			t.debugTargetIP = targetIP
-
-			// Create PCAP writer
-			outputFile := captureCfg.OutputFile
-			if outputFile == "" {
-				outputFile = "capture.pcap"
-			}
-
-			f, err := os.Create(outputFile)
-			if err != nil {
-				slog.Error("Failed to create PCAP file", "error", err)
-			} else {
-				w := pcapgo.NewWriter(f)
-				err = w.WriteFileHeader(65536, layers.LinkTypeEthernet)
-				if err != nil {
-					slog.Error("Failed to write PCAP header", "error", err)
-					_ = f.Close()
-				} else {
-					t.debugWriter = w
-					slog.Info("PCAP capture enabled",
-						"targetIP", targetIP.String(),
-						"outputFile", outputFile)
-				}
-			}
+		debugCapture, err := NewDebugCapture(captureCfg.TargetIP, captureCfg.OutputFile)
+		if err != nil {
+			slog.Error("Failed to setup PCAP capture", "error", err)
+		} else {
+			t.debugCapture = debugCapture
 		}
 	}
 
@@ -233,28 +205,9 @@ func (t *PCAP) Read() []byte {
 		slog.Debug("READ packet", "packet", packet.String())
 	}
 
-	// Check if we should capture this packet
-	if t.debugWriter != nil && t.debugTargetIP != nil {
-		ethProtocol := header.Ethernet(data)
-		if ethProtocol.Type() == header.IPv4ProtocolNumber {
-			ipProtocol := header.IPv4(data[14:])
-			srcAddr := ipProtocol.SourceAddress()
-			dstAddr := ipProtocol.DestinationAddress()
-			srcIP := srcAddr.AsSlice()
-			dstIP := dstAddr.AsSlice()
-
-			// Capture if source or destination matches target IP
-			if bytes.Equal(srcIP, t.debugTargetIP) || bytes.Equal(dstIP, t.debugTargetIP) {
-				if len(data) > 2000 {
-					slog.Warn("Captured packet is larger than 2000 bytes, truncating",
-						"length", len(data), "captureInfo", ci)
-				}
-				err := t.debugWriter.WritePacket(ci, data)
-				if err != nil {
-					slog.Error("Failed to write packet to PCAP", "error", err)
-				}
-			}
-		}
+	// Capture packet if debug is enabled
+	if t.debugCapture != nil {
+		t.debugCapture.CapturePacket(data, ci)
 	}
 
 	ethProtocol := header.Ethernet(data)
@@ -295,6 +248,11 @@ func (t *PCAP) Read() []byte {
 }
 
 func (t *PCAP) Write(p []byte) (n int, err error) {
+	// Capture outgoing packet if debug is enabled
+	if t.debugCapture != nil {
+		t.debugCapture.CaptureOutgoingPacket(p)
+	}
+
 	err = t.handle.WritePacketData(p)
 	if err != nil {
 		slog.Error("write packet error: %w", slog.Any("err", err))
@@ -311,6 +269,11 @@ func (t *PCAP) Name() string {
 func (t *PCAP) Close() {
 	defer t.ep.Close()
 	t.handle.Close()
+
+	// Close debug capture if enabled
+	if t.debugCapture != nil {
+		t.debugCapture.Close()
+	}
 }
 
 func (t *PCAP) Type() string {
