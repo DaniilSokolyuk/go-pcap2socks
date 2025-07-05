@@ -24,6 +24,27 @@ import (
 var configData string
 
 func main() {
+	// Setup logging - check SLOG_LEVEL env var
+	logLevel := slog.LevelInfo // Default to debug
+	if lvl := os.Getenv("SLOG_LEVEL"); lvl != "" {
+		switch lvl {
+		case "debug", "DEBUG":
+			logLevel = slog.LevelDebug
+		case "info", "INFO":
+			logLevel = slog.LevelInfo
+		case "warn", "WARN":
+			logLevel = slog.LevelWarn
+		case "error", "ERROR":
+			logLevel = slog.LevelError
+		}
+	}
+
+	opts := &slog.HandlerOptions{
+		Level: logLevel,
+	}
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	slog.SetDefault(slog.New(handler))
+
 	// get config file from first argument or use config.json
 	var cfgFile string
 	if len(os.Args) > 1 {
@@ -31,7 +52,7 @@ func main() {
 	} else {
 		executable, err := os.Executable()
 		if err != nil {
-			slog.Error("get executable error", "error", err)
+			slog.Error("get executable error", slog.Any("err", err))
 			return
 		}
 
@@ -44,14 +65,14 @@ func main() {
 		//path to near executable file
 		err := os.WriteFile(cfgFile, []byte(configData), 0666)
 		if err != nil {
-			slog.Error("write config error", "file", cfgFile, "error", err)
+			slog.Error("write config error", slog.Any("file", cfgFile), slog.Any("err", err))
 			return
 		}
 	}
 
 	config, err := cfg.Load(cfgFile)
 	if err != nil {
-		slog.Error("load config error", "file", cfgFile, "error", err)
+		slog.Error("load config error", slog.Any("file", cfgFile), slog.Any("err", err))
 		return
 	}
 	slog.Info("Config loaded", "file", cfgFile)
@@ -72,7 +93,7 @@ func main() {
 		go func() {
 			err := cmd.Start()
 			if err != nil {
-				slog.Error("execute command error", "error", err)
+				slog.Error("execute command error", slog.Any("err", err))
 			}
 
 			err = cmd.Wait()
@@ -84,14 +105,14 @@ func main() {
 
 	err = run(config)
 	if err != nil {
-		slog.Error("run error", "error", err)
+		slog.Error("run error", slog.Any("err", err))
 		return
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello world!"))
 	})
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8085", nil))
 }
 
 func run(cfg *cfg.Config) error {
@@ -109,6 +130,8 @@ func run(cfg *cfg.Config) error {
 			}
 		case outbound.Reject != nil:
 			p = proxy.NewReject()
+		case outbound.DNS != nil:
+			p = proxy.NewDNS(cfg.DNS)
 		default:
 			return fmt.Errorf("invalid outbound: %+v", outbound)
 		}
@@ -119,7 +142,7 @@ func run(cfg *cfg.Config) error {
 	_defaultProxy = proxy.NewRouter(cfg.Routing.Rules, proxies)
 	proxy.SetDialer(_defaultProxy)
 
-	_defaultDevice, err = device.Open(cfg.PCAP, func() device.Stacker {
+	_defaultDevice, err = device.Open(cfg.PCAP, cfg.Capture, func() device.Stacker {
 		return _defaultStack
 	})
 	if err != nil {
@@ -132,7 +155,7 @@ func run(cfg *cfg.Config) error {
 		MulticastGroups:  []net.IP{},
 		Options:          []option.Option{},
 	}); err != nil {
-		slog.Error("create stack error: %w", err)
+		slog.Error("create stack error", slog.Any("err", err))
 	}
 
 	return nil

@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.23.1'
       - run: sudo apt-get install -y libpcap-dev
       - run: go mod tidy
       - run: go test -v ./...

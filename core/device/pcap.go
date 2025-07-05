@@ -18,6 +18,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/ethernet"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
 type PCAP struct {
@@ -34,26 +35,29 @@ type PCAP struct {
 	Interface  net.Interface
 	rMux       sync.Mutex
 	stacker    func() Stacker
+
+	// Debug PCAP capture
+	debugCapture *DebugCapture
 }
 
 const offset = 0
 
-func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
+func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, stacker func() Stacker) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("open tun: %v", r)
 		}
 	}()
 
-	ifce, dev := findDevInterface(cfg.InterfaceGateway)
+	ifce, dev := findDevInterface(pcapCfg.InterfaceGateway)
 	slog.Info("Using ethernet interface", "interface", ifce.Name, "name", dev.Name, "mac", ifce.HardwareAddr.String())
 
-	_, network, err := net.ParseCIDR(cfg.Network)
+	_, network, err := net.ParseCIDR(pcapCfg.Network)
 	if err != nil {
 		return nil, fmt.Errorf("parse cidr error: %w", err)
 	}
 
-	localIP := net.ParseIP(cfg.LocalIP)
+	localIP := net.ParseIP(pcapCfg.LocalIP)
 	if localIP == nil {
 		return nil, fmt.Errorf("parse local ip error: %w", err)
 	}
@@ -64,19 +68,14 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 	}
 
 	var localMAC net.HardwareAddr
-	if cfg.LocalMAC != "" {
-		localMAC, err = net.ParseMAC(cfg.LocalMAC)
+	if pcapCfg.LocalMAC != "" {
+		localMAC, err = net.ParseMAC(pcapCfg.LocalMAC)
 		if localMAC == nil {
 			return nil, fmt.Errorf("parse local mac error: %w", err)
 		}
 	} else {
 		localMAC = ifce.HardwareAddr
 	}
-
-	slog.Default().Info("Enter this settings in your device's network settings",
-		"ip", network.String(),
-		"mask", net.IP(network.Mask).String(),
-		"gateway", localIP.String())
 
 	pcaphInactive, err := createPcapHandle(dev)
 	if err != nil {
@@ -94,10 +93,22 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}
 
-	mtu := cfg.MTU
+	mtu := pcapCfg.MTU
 	if mtu == 0 {
 		mtu = uint32(ifce.MTU)
 	}
+
+	ipRangeStart, ipRangeEnd := calculateIPRange(network, localIP)
+	recommendedMTU := calculateRecommendedMTU(mtu)
+
+	// Log network settings in a cleaner format
+	slog.Info("Configure your device with these network settings:")
+	slog.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	slog.Info(fmt.Sprintf("  IP Address:     %s - %s", ipRangeStart.String(), ipRangeEnd.String()))
+	slog.Info(fmt.Sprintf("  Subnet Mask:    %s", net.IP(network.Mask).String()))
+	slog.Info(fmt.Sprintf("  Gateway:        %s", localIP.String()))
+	slog.Info(fmt.Sprintf("  MTU:            %d (or lower)", recommendedMTU))
+	slog.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	t := &PCAP{
 		name:       "dspcap",
@@ -108,6 +119,16 @@ func Open(cfg cfg.PCAP, stacker func() Stacker) (_ Device, err error) {
 		localMAC:   localMAC,
 		handle:     pcaph,
 		ipMacTable: make(map[string]net.HardwareAddr),
+	}
+
+	// Setup PCAP capture if enabled
+	if captureCfg.Enabled && captureCfg.TargetIP != "" {
+		debugCapture, err := NewDebugCapture(captureCfg.TargetIP, captureCfg.OutputFile)
+		if err != nil {
+			slog.Error("Failed to setup PCAP capture", "error", err)
+		} else {
+			t.debugCapture = debugCapture
+		}
 	}
 
 	ep, err := iobased.New(t, mtu, offset, t.localMAC)
@@ -172,10 +193,21 @@ func createPcapHandle(dev pcap.Interface) (*pcap.InactiveHandle, error) {
 func (t *PCAP) Read() []byte {
 	t.rMux.Lock()
 	defer t.rMux.Unlock()
-	data, _, err := t.handle.ZeroCopyReadPacketData()
+	data, ci, err := t.handle.ZeroCopyReadPacketData()
 	if err != nil {
-		slog.Error("read packet error: %w", err)
+		slog.Error("read packet error: %w", slog.Any("err", err))
 		return nil
+	}
+
+	// Debug: Parse and log incoming packet
+	if slog.Default().Enabled(nil, slog.LevelDebug) && len(data) > 14 {
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
+		slog.Debug("READ packet", "packet", packet.String())
+	}
+
+	// Capture packet if debug is enabled
+	if t.debugCapture != nil {
+		t.debugCapture.CapturePacket(data, ci)
 	}
 
 	ethProtocol := header.Ethernet(data)
@@ -216,13 +248,17 @@ func (t *PCAP) Read() []byte {
 }
 
 func (t *PCAP) Write(p []byte) (n int, err error) {
+	// Capture outgoing packet if debug is enabled
+	if t.debugCapture != nil {
+		t.debugCapture.CaptureOutgoingPacket(p)
+	}
+
 	err = t.handle.WritePacketData(p)
 	if err != nil {
-		slog.Error("write packet error: %w", err)
+		slog.Error("write packet error: %w", slog.Any("err", err))
 		return 0, nil
 	}
 
-	//fmt.Println("==============================reply: " + gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default).String())
 	return len(p), nil
 }
 
@@ -233,6 +269,11 @@ func (t *PCAP) Name() string {
 func (t *PCAP) Close() {
 	defer t.ep.Close()
 	t.handle.Close()
+
+	// Close debug capture if enabled
+	if t.debugCapture != nil {
+		t.debugCapture.Close()
+	}
 }
 
 func (t *PCAP) Type() string {
@@ -317,4 +358,40 @@ func findDevInterface(cfgIfce string) (net.Interface, pcap.Interface) {
 
 type Stacker interface {
 	AddStaticNeighbor(nicID tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address, linkAddr tcpip.LinkAddress) tcpip.Error
+	AddProtocolAddress(id tcpip.NICID, protocolAddress tcpip.ProtocolAddress, properties stack.AddressProperties) tcpip.Error
+}
+
+// calculateIPRange calculates the usable IP range for the given network
+func calculateIPRange(network *net.IPNet, gatewayIP net.IP) (start, end net.IP) {
+	networkIP := network.IP.To4()
+	start = make(net.IP, 4)
+	end = make(net.IP, 4)
+
+	// Calculate start IP (first usable IP after network address)
+	copy(start, networkIP)
+	// Increment the last octet by 1 to get first usable IP
+	start[3]++
+
+	// Calculate end IP (last usable IP before broadcast)
+	for i := 0; i < 4; i++ {
+		end[i] = networkIP[i] | ^network.Mask[i]
+	}
+	end[3]-- // Exclude broadcast address
+
+	// If start IP is the gateway, increment to next IP
+	if start.Equal(gatewayIP) {
+		start[3]++
+	}
+
+	return start, end
+}
+
+// calculateRecommendedMTU calculates the recommended MTU based on interface MTU
+func calculateRecommendedMTU(interfaceMTU uint32) uint32 {
+	const ethernetHeaderSize = 14
+	recommendedMTU := interfaceMTU - ethernetHeaderSize
+	if recommendedMTU <= 0 {
+		recommendedMTU = 1486 // Default safe value
+	}
+	return recommendedMTU
 }
