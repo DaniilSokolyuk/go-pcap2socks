@@ -10,6 +10,7 @@ For **Windows**, install [Npcap](http://www.npcap.org/) or WinPcap. If you choos
 Config example is [here](https://github.com/DaniilSokolyuk/go-pcap2socks/blob/main/config.json)
 
 ## Credits
+- https://github.com/google/gvisor - TCP/IP stack
 - https://github.com/zhxie/pcap2socks - Idea
 - https://github.com/xjasonlyu/tun2socks - socks5 client
 - https://github.com/SagerNet/sing-box Full Cone NAT
