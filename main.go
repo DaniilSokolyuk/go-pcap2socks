@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"runtime"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
@@ -47,6 +48,12 @@ func main() {
 	}
 	handler := slog.NewTextHandler(os.Stdout, opts)
 	slog.SetDefault(slog.New(handler))
+
+	// Check for config command
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		openConfigInEditor()
+		return
+	}
 
 	// get config file from first argument or use config.json
 	var cfgFile string
@@ -332,4 +339,66 @@ func calculateRecommendedMTU(mtu uint32) uint32 {
 	}
 
 	return recommendedMTU
+}
+
+func openConfigInEditor() {
+	// Get config file path
+	executable, err := os.Executable()
+	if err != nil {
+		slog.Error("get executable error", slog.Any("err", err))
+		return
+	}
+	cfgFile := path.Join(path.Dir(executable), "config.json")
+
+	// Create config if it doesn't exist
+	if !cfg.Exists(cfgFile) {
+		slog.Info("Config file not found, creating a new one", "file", cfgFile)
+		err := os.WriteFile(cfgFile, []byte(configData), 0666)
+		if err != nil {
+			slog.Error("write config error", slog.Any("file", cfgFile), slog.Any("err", err))
+			return
+		}
+	}
+
+	// Determine the editor command based on OS
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("notepad", cfgFile)
+	case "darwin":
+		cmd = exec.Command("open", "-t", cfgFile)
+	default: // linux and others
+		// Try to use EDITOR env var first
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = os.Getenv("VISUAL")
+		}
+		if editor == "" {
+			// Try common editors
+			editors := []string{"nano", "vim", "vi"}
+			for _, e := range editors {
+				if _, err := exec.LookPath(e); err == nil {
+					editor = e
+					break
+				}
+			}
+		}
+		if editor == "" {
+			slog.Error("no editor found. Set EDITOR environment variable")
+			return
+		}
+		cmd = exec.Command(editor, cfgFile)
+	}
+
+	// Set up the command to use the current terminal
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Run the editor
+	slog.Info("Opening config in editor", "file", cfgFile)
+	err = cmd.Run()
+	if err != nil {
+		slog.Error("failed to open editor", slog.Any("err", err))
+	}
 }
