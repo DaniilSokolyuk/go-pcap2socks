@@ -121,9 +121,7 @@ jobs:
           name: go-pcap2socks-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             go-pcap2socks_*.tar.gz
-            go-pcap2socks_*.tar.gz.sha256
             go-pcap2socks_*.zip
-            go-pcap2socks_*.zip.sha256
 
   release:
     name: Release
