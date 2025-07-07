@@ -14,7 +14,6 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
-	"github.com/jackpal/gateway"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/ethernet"
@@ -42,39 +41,17 @@ type PCAP struct {
 
 const offset = 0
 
-func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, stacker func() Stacker) (_ Device, err error) {
+func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, stacker func() Stacker) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("open tun: %v", r)
 		}
 	}()
 
-	ifce, dev := findDevInterface(pcapCfg.InterfaceGateway)
-	slog.Info("Using ethernet interface", "interface", ifce.Name, "name", dev.Name, "mac", ifce.HardwareAddr.String())
-
-	_, network, err := net.ParseCIDR(pcapCfg.Network)
+	// Find the pcap device for this interface
+	dev, err := findPcapDevice(ifce)
 	if err != nil {
-		return nil, fmt.Errorf("parse cidr error: %w", err)
-	}
-
-	localIP := net.ParseIP(pcapCfg.LocalIP)
-	if localIP == nil {
-		return nil, fmt.Errorf("parse local ip error: %w", err)
-	}
-
-	localIP = localIP.To4()
-	if !network.Contains(localIP) {
-		return nil, fmt.Errorf("local ip (%s) not in network (%s)", localIP, network)
-	}
-
-	var localMAC net.HardwareAddr
-	if pcapCfg.LocalMAC != "" {
-		localMAC, err = net.ParseMAC(pcapCfg.LocalMAC)
-		if localMAC == nil {
-			return nil, fmt.Errorf("parse local mac error: %w", err)
-		}
-	} else {
-		localMAC = ifce.HardwareAddr
+		return nil, err
 	}
 
 	pcaphInactive, err := createPcapHandle(dev)
@@ -88,35 +65,18 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, stacker func() Stacker) (_ D
 	}
 
 	//arp or src net 172.24.2.0/24
-	err = pcaph.SetBPFFilter(fmt.Sprintf("arp or src net %s", network.String()))
+	err = pcaph.SetBPFFilter(fmt.Sprintf("arp or src net %s", netConfig.Network.String()))
 	if err != nil {
 		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}
-
-	mtu := pcapCfg.MTU
-	if mtu == 0 {
-		mtu = uint32(ifce.MTU)
-	}
-
-	ipRangeStart, ipRangeEnd := calculateIPRange(network, localIP)
-	recommendedMTU := calculateRecommendedMTU(mtu)
-
-	// Log network settings in a cleaner format
-	slog.Info("Configure your device with these network settings:")
-	slog.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	slog.Info(fmt.Sprintf("  IP Address:     %s - %s", ipRangeStart.String(), ipRangeEnd.String()))
-	slog.Info(fmt.Sprintf("  Subnet Mask:    %s", net.IP(network.Mask).String()))
-	slog.Info(fmt.Sprintf("  Gateway:        %s", localIP.String()))
-	slog.Info(fmt.Sprintf("  MTU:            %d (or lower)", recommendedMTU))
-	slog.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	t := &PCAP{
 		name:       "dspcap",
 		stacker:    stacker,
 		Interface:  ifce,
-		network:    network,
-		localIP:    localIP,
-		localMAC:   localMAC,
+		network:    netConfig.Network,
+		localIP:    netConfig.LocalIP,
+		localMAC:   netConfig.LocalMAC,
 		handle:     pcaph,
 		ipMacTable: make(map[string]net.HardwareAddr),
 	}
@@ -131,7 +91,7 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, stacker func() Stacker) (_ D
 		}
 	}
 
-	ep, err := iobased.New(t, mtu, offset, t.localMAC)
+	ep, err := iobased.New(t, netConfig.MTU, offset, t.localMAC)
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
@@ -141,7 +101,7 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, stacker func() Stacker) (_ D
 
 	// send gratuitous arp
 	{
-		arpGratuitous, err := arpr.SendGratuitousArp(localIP, localMAC)
+		arpGratuitous, err := arpr.SendGratuitousArp(netConfig.LocalIP, netConfig.LocalMAC)
 		if err != nil {
 			return nil, fmt.Errorf("send gratuitous arp error: %w", err)
 		}
@@ -149,7 +109,6 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, stacker func() Stacker) (_ D
 		err = t.handle.WritePacketData(arpGratuitous)
 		if err != nil {
 			return nil, fmt.Errorf("write packet error: %w", err)
-
 		}
 	}
 
@@ -289,109 +248,36 @@ func (t *PCAP) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
 	}
 }
 
-func findDevInterface(cfgIfce string) (net.Interface, pcap.Interface) {
-	var targetIface net.IP
-	if cfgIfce != "" {
-		targetIface = net.ParseIP(cfgIfce)
-		if targetIface == nil {
-			panic(fmt.Errorf("parse ip error, %s", cfgIfce))
-		}
-	} else {
-		var err error
-		targetIface, err = gateway.DiscoverInterface()
-		if err != nil {
-			panic(fmt.Errorf("discover interface error: %w", err))
-		}
-	}
-
-	// Get a list of all interfaces.
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		panic(err)
-	}
-
-	// Get a list of all devices
-	devices, err := pcap.FindAllDevs()
-	if err != nil {
-		panic(err)
-	}
-
-	var foundIface net.Interface
-	var foundDev pcap.Interface
-
-	for _, iface := range ifaces {
-		var addr *net.IPNet
-
-		if addrs, err := iface.Addrs(); err != nil {
-			continue
-		} else {
-			for _, a := range addrs {
-				if ipnet, ok := a.(*net.IPNet); ok {
-					if ip4 := ipnet.IP.To4(); ip4 != nil && bytes.Equal(ip4, targetIface.To4()) {
-						addr = &net.IPNet{
-							IP:   ip4,
-							Mask: ipnet.Mask[len(ipnet.Mask)-4:],
-						}
-						break
-					}
-				}
-			}
-		}
-
-		if addr == nil {
-			continue
-		}
-
-		for _, dev := range devices {
-			for _, address := range dev.Addresses {
-				if address.IP.Equal(addr.IP) {
-					foundIface = iface
-					foundDev = dev
-					break
-				}
-			}
-		}
-	}
-
-	return foundIface, foundDev
-}
-
 type Stacker interface {
 	AddStaticNeighbor(nicID tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address, linkAddr tcpip.LinkAddress) tcpip.Error
 	AddProtocolAddress(id tcpip.NICID, protocolAddress tcpip.ProtocolAddress, properties stack.AddressProperties) tcpip.Error
 }
 
-// calculateIPRange calculates the usable IP range for the given network
-func calculateIPRange(network *net.IPNet, gatewayIP net.IP) (start, end net.IP) {
-	networkIP := network.IP.To4()
-	start = make(net.IP, 4)
-	end = make(net.IP, 4)
-
-	// Calculate start IP (first usable IP after network address)
-	copy(start, networkIP)
-	// Increment the last octet by 1 to get first usable IP
-	start[3]++
-
-	// Calculate end IP (last usable IP before broadcast)
-	for i := 0; i < 4; i++ {
-		end[i] = networkIP[i] | ^network.Mask[i]
-	}
-	end[3]-- // Exclude broadcast address
-
-	// If start IP is the gateway, increment to next IP
-	if start.Equal(gatewayIP) {
-		start[3]++
+func findPcapDevice(ifce net.Interface) (pcap.Interface, error) {
+	// Get all pcap devices
+	devices, err := pcap.FindAllDevs()
+	if err != nil {
+		return pcap.Interface{}, fmt.Errorf("find all devices error: %w", err)
 	}
 
-	return start, end
-}
-
-// calculateRecommendedMTU calculates the recommended MTU based on interface MTU
-func calculateRecommendedMTU(interfaceMTU uint32) uint32 {
-	const ethernetHeaderSize = 14
-	recommendedMTU := interfaceMTU - ethernetHeaderSize
-	if recommendedMTU <= 0 {
-		recommendedMTU = 1486 // Default safe value
+	// Get interface addresses
+	addrs, err := ifce.Addrs()
+	if err != nil {
+		return pcap.Interface{}, fmt.Errorf("get interface addresses error: %w", err)
 	}
-	return recommendedMTU
+
+	// Find matching device
+	for _, dev := range devices {
+		for _, devAddr := range dev.Addresses {
+			for _, ifaceAddr := range addrs {
+				if ipnet, ok := ifaceAddr.(*net.IPNet); ok {
+					if devAddr.IP.Equal(ipnet.IP) {
+						return dev, nil
+					}
+				}
+			}
+		}
+	}
+
+	return pcap.Interface{}, fmt.Errorf("pcap device not found for interface %s", ifce.Name)
 }

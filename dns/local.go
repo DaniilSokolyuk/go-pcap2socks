@@ -12,18 +12,20 @@ type LocalClient interface {
 }
 
 type localClient struct {
-	client      *dns.Client
-	config      *dns.ClientConfig
-	currentTime func() time.Time
+	client        *dns.Client
+	config        *dns.ClientConfig
+	currentTime   func() time.Time
+	interfaceName string
 }
 
-func NewLocalClient() LocalClient {
+func NewLocalClient(interfaceName string) LocalClient {
 	return &localClient{
 		client: &dns.Client{
 			Timeout: 5 * time.Second,
 			UDPSize: dns.DefaultMsgSize,
 		},
-		currentTime: time.Now,
+		currentTime:   time.Now,
+		interfaceName: interfaceName,
 	}
 }
 

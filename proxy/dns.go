@@ -16,8 +16,9 @@ import (
 var _ Proxy = (*DNS)(nil)
 
 type DNS struct {
-	cfg       cfg.DNS
-	dnsClient *dns.Client
+	cfg           cfg.DNS
+	dnsClient     *dns.Client
+	interfaceName string
 }
 
 func (d *DNS) Addr() string {
@@ -28,13 +29,14 @@ func (d *DNS) Mode() Mode {
 	panic("implement me")
 }
 
-func NewDNS(cfg cfg.DNS) *DNS {
+func NewDNS(cfg cfg.DNS, interfaceName string) *DNS {
 	dnsClient := new(dns.Client)
 	dnsClient.UDPSize = math.MaxUint16
 
 	return &DNS{
-		dnsClient: dnsClient,
-		cfg:       cfg,
+		dnsClient:     dnsClient,
+		cfg:           cfg,
+		interfaceName: interfaceName,
 	}
 }
 
@@ -44,18 +46,20 @@ func (d *DNS) DialContext(_ context.Context, _ *M.Metadata) (net.Conn, error) {
 
 func (d *DNS) DialUDP(m *M.Metadata) (net.PacketConn, error) {
 	return &dnsConn{
-		cfg:       d.cfg,
-		m:         m,
-		dnsClient: d.dnsClient,
-		answerCh:  make(chan *dns.Msg),
+		cfg:           d.cfg,
+		m:             m,
+		dnsClient:     d.dnsClient,
+		answerCh:      make(chan *dns.Msg),
+		interfaceName: d.interfaceName,
 	}, nil
 }
 
 type dnsConn struct {
-	dnsClient *dns.Client
-	answerCh  chan *dns.Msg
-	m         *M.Metadata
-	cfg       cfg.DNS
+	dnsClient     *dns.Client
+	answerCh      chan *dns.Msg
+	m             *M.Metadata
+	cfg           cfg.DNS
+	interfaceName string
 }
 
 func (d *dnsConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
@@ -81,7 +85,7 @@ func (d *dnsConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
 
 		for _, server := range d.cfg.Servers {
 			if server.Address == "local" {
-				localClient := localdns.NewLocalClient()
+				localClient := localdns.NewLocalClient(d.interfaceName)
 				response, lastErr = localClient.Exchange(msg)
 				if lastErr == nil {
 					d.answerCh <- response
