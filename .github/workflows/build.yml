@@ -1,32 +1,148 @@
-name: build
+name: Build and Release
 
 on:
-  pull_request:
   push:
-    # run only against tags
+    branches: [ main ]
     tags:
-      - "*"
+      - 'v*.*.*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
 
 permissions:
   contents: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cgo: '1'
+            target: go-pcap2socks-linux-amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            cgo: '1'
+            cc: aarch64-linux-gnu-gcc
+            target: go-pcap2socks-linux-arm64
+          # macOS builds
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            cgo: '1'
+            target: go-pcap2socks-darwin-arm64
+          # Windows build
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            cgo: '0'
+            target: go-pcap2socks-windows-amd64.exe
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.1'
-      - run: sudo apt-get install -y libpcap-dev
-      - run: go mod tidy
-      - run: go test -v ./...
-      - uses: goreleaser/goreleaser-action@v6
+          go-version: stable
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev
+          # Install cross-compiler for ARM64
+          if [ "${{ matrix.goarch }}" = "arm64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            # Setup libpcap for ARM64 cross-compilation
+            cd /tmp
+            wget http://www.tcpdump.org/release/libpcap-1.10.1.tar.gz
+            tar xzf libpcap-1.10.1.tar.gz
+            cd libpcap-1.10.1
+            export CC=aarch64-linux-gnu-gcc
+            ./configure --host=aarch64-linux --with-pcap=linux
+            make
+            sudo make install DESTDIR=/tmp/libpcap-arm64
+            echo "CGO_LDFLAGS=-L/tmp/libpcap-arm64/usr/local/lib" >> $GITHUB_ENV
+            echo "CGO_CFLAGS=-I/tmp/libpcap-arm64/usr/local/include" >> $GITHUB_ENV
+          fi
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install libpcap
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install openssl.light -y
+          choco install make -y
+          choco install 7zip -y
+          curl -L "https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip" -o "C:\wpcap-sdk.zip"
+          7z x -y "C:\wpcap-sdk.zip" -o"C:\winpcap"
+
+      - name: Test
+        if: matrix.goarch == 'amd64'  # Only test on native architecture
+        run: go test -v ./...
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
+          CC: ${{ matrix.cc }}
+        run: |
+          go build -ldflags="-s -w" -o ${{ matrix.target }} .
+
+      - name: Create package
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          case "$VERSION" in
+            v*.*.*) ;;
+            *) VERSION="dev-${GITHUB_SHA::8}" ;;
+          esac
+          
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${{ matrix.target }}" README.md LICENSE install.md config.md
+          else
+            tar czf "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${{ matrix.target }}" README.md LICENSE install.md config.md
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
+          name: go-pcap2socks-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            go-pcap2socks_*.tar.gz
+            go-pcap2socks_*.zip
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: go-pcap2socks-*
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

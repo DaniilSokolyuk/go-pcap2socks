@@ -1,6 +1,8 @@
 package device
 
 import (
+	"net"
+
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
@@ -14,4 +16,12 @@ type Device interface {
 
 	// Type returns the driver type of the device.
 	Type() string
+}
+
+// NetworkConfig holds the parsed network configuration
+type NetworkConfig struct {
+	Network  *net.IPNet
+	LocalIP  net.IP
+	LocalMAC net.HardwareAddr
+	MTU      uint32
 }
