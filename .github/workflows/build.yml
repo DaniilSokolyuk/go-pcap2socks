@@ -81,12 +81,11 @@ jobs:
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          choco install winpcap -y
-          # Download WinPcap developer pack
-          Invoke-WebRequest -Uri "https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip" -OutFile "C:\wpcap-sdk.zip"
-          Expand-Archive -Path "C:\wpcap-sdk.zip" -DestinationPath "C:\winpcap"
-          echo "CGO_CFLAGS=-IC:\winpcap\WpdPack\Include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "CGO_LDFLAGS=-LC:\winpcap\WpdPack\Lib\x64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          choco install openssl.light -y
+          choco install make -y
+          choco install 7zip -y
+          curl -L "https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip" -o "C:\wpcap-sdk.zip"
+          7z x -y "C:\wpcap-sdk.zip" -o"C:\winpcap"
 
       - name: Test
         if: matrix.goarch == 'amd64'  # Only test on native architecture

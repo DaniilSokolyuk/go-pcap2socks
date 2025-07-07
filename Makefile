@@ -43,7 +43,7 @@ test:
 .PHONY: clean
 clean:
 	rm -f $(BINARY_NAME) $(BINARY_NAME)-*
-	rm -f *.tar.gz *.zip *.sha256
+	rm -f *.tar.gz *.zip
 
 # Install
 .PHONY: install
@@ -67,16 +67,12 @@ package: clean build-all
 	@echo "Creating release packages..."
 	# Linux AMD64
 	tar czf $(BINARY_NAME)_$(VERSION)_linux_amd64.tar.gz $(BINARY_NAME)-linux-amd64 README.md LICENSE install.md config.md
-	sha256sum $(BINARY_NAME)_$(VERSION)_linux_amd64.tar.gz > $(BINARY_NAME)_$(VERSION)_linux_amd64.tar.gz.sha256
 	# Linux ARM64
 	tar czf $(BINARY_NAME)_$(VERSION)_linux_arm64.tar.gz $(BINARY_NAME)-linux-arm64 README.md LICENSE install.md config.md
-	sha256sum $(BINARY_NAME)_$(VERSION)_linux_arm64.tar.gz > $(BINARY_NAME)_$(VERSION)_linux_arm64.tar.gz.sha256
 	# Darwin ARM64
 	tar czf $(BINARY_NAME)_$(VERSION)_darwin_arm64.tar.gz $(BINARY_NAME)-darwin-arm64 README.md LICENSE install.md config.md
-	sha256sum $(BINARY_NAME)_$(VERSION)_darwin_arm64.tar.gz > $(BINARY_NAME)_$(VERSION)_darwin_arm64.tar.gz.sha256
 	# Windows AMD64
 	zip $(BINARY_NAME)_$(VERSION)_windows_amd64.zip $(BINARY_NAME)-windows-amd64.exe README.md LICENSE install.md config.md
-	sha256sum $(BINARY_NAME)_$(VERSION)_windows_amd64.zip > $(BINARY_NAME)_$(VERSION)_windows_amd64.zip.sha256
 
 .PHONY: help
 help:
