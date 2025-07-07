@@ -3,9 +3,10 @@
 package dns
 
 import (
-	"net"
 	"net/netip"
 	"os"
+	"slices"
+	"strconv"
 	"syscall"
 	"unsafe"
 
@@ -29,22 +30,18 @@ func (lc *localClient) getConfig() (*dns.ClientConfig, error) {
 			return nil, err
 		}
 
-		var dnsAddresses []struct {
-			ifName string
-			netip.Addr
-		}
-		for _, address := range addresses {
-			if address.OperStatus != windows.IfOperStatusUp {
+		for _, aa := range addresses {
+			if aa.OperStatus != windows.IfOperStatusUp {
 				continue
 			}
-			if address.IfType == windows.IF_TYPE_TUNNEL {
+			if aa.IfType == windows.IF_TYPE_TUNNEL {
 				continue
 			}
-			if address.FirstGatewayAddress == nil {
+			if aa.FirstGatewayAddress == nil {
 				continue
 			}
-			for dnsServerAddress := address.FirstDnsServerAddress; dnsServerAddress != nil; dnsServerAddress = dnsServerAddress.Next {
-				rawSockaddr, err := dnsServerAddress.Address.Sockaddr.Sockaddr()
+			for dns := aa.FirstDnsServerAddress; dns != nil; dns = dns.Next {
+				rawSockaddr, err := dns.Address.Sockaddr.Sockaddr()
 				if err != nil {
 					continue
 				}
@@ -62,23 +59,27 @@ func (lc *localClient) getConfig() (*dns.ClientConfig, error) {
 						continue
 					}
 					dnsServerAddr = netip.AddrFrom16(sockaddr.Addr)
+					if sockaddr.ZoneId != 0 {
+						dnsServerAddr = dnsServerAddr.WithZone(strconv.FormatInt(int64(sockaddr.ZoneId), 10))
+					}
 				default:
 					// Unexpected type.
 					continue
 				}
-				dnsAddresses = append(dnsAddresses, struct {
-					ifName string
-					netip.Addr
-				}{ifName: windows.UTF16PtrToString(address.FriendlyName), Addr: dnsServerAddr})
-			}
-		}
 
-		// Filter out DNS servers from the interface we're using
-		for _, address := range dnsAddresses {
-			if address.ifName == lc.interfaceName {
-				continue
+				ifName := windows.UTF16PtrToString(aa.FriendlyName)
+				if ifName != lc.interfaceName {
+					continue
+				}
+
+				ipStr := dnsServerAddr.String()
+
+				if slices.Contains(config.Servers, ipStr) {
+					continue
+				}
+
+				config.Servers = append(config.Servers, ipStr)
 			}
-			config.Servers = append(config.Servers, net.JoinHostPort(address.Addr.String(), "53"))
 		}
 
 		lc.config = config
