@@ -26,3 +26,10 @@ go.work
 /build_assets
 *.zip
 *.tar.gz
+
+# Build artifacts
+go-pcap2socks
+go-pcap2socks-*
+go_build_*
+-h
+*.sha256
