@@ -104,14 +104,15 @@ jobs:
         shell: bash
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          if [[ "$VERSION" != v*.*.* ]]; then
-            VERSION="dev-${GITHUB_SHA::8}"
-          fi
+          case "$VERSION" in
+            v*.*.*) ;;
+            *) VERSION="dev-${GITHUB_SHA::8}" ;;
+          esac
           
-          if [[ "${{ matrix.goos }}" == "windows" ]]; then
-            zip go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip ${{ matrix.target }} README.md LICENSE install.md config.md
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${{ matrix.target }}" README.md LICENSE install.md config.md
           else
-            tar czf go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz ${{ matrix.target }} README.md LICENSE install.md config.md
+            tar czf "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${{ matrix.target }}" README.md LICENSE install.md config.md
           fi
 
       - name: Upload artifacts
