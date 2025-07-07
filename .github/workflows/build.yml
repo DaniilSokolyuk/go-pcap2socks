@@ -111,10 +111,8 @@ jobs:
           
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
             zip go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip ${{ matrix.target }} README.md LICENSE install.md config.md
-            sha256sum go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip > go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip.sha256
           else
             tar czf go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz ${{ matrix.target }} README.md LICENSE install.md config.md
-            sha256sum go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz > go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz.sha256
           fi
 
       - name: Upload artifacts
