@@ -7,7 +7,7 @@ toolchain go1.24.4
 require (
 	github.com/anacrolix/log v0.16.0
 	github.com/anacrolix/upnp v0.1.4
-	github.com/gopacket/gopacket v1.3.1
+	github.com/gopacket/gopacket v1.4.0
 	github.com/jackpal/gateway v1.1.1
 	github.com/miekg/dns v1.1.67
 	github.com/sagernet/sing v0.6.11
