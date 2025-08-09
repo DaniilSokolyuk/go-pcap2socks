@@ -9,7 +9,7 @@ require (
 	github.com/anacrolix/upnp v0.1.4
 	github.com/gopacket/gopacket v1.4.0
 	github.com/jackpal/gateway v1.1.1
-	github.com/miekg/dns v1.1.67
+	github.com/miekg/dns v1.1.68
 	github.com/sagernet/sing v0.7.5
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/atomic v1.11.0
