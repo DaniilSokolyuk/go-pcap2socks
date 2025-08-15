@@ -2,8 +2,8 @@ github.com/anacrolix/generics v0.0.0-20230113004304-d6428d516633/go.mod h1:ff2rH
 github.com/anacrolix/generics v0.0.3 h1:wMkQgQzq0obSy1tMkxDu7Ife7PsegOBWHDRaSW31EnM=
 github.com/anacrolix/generics v0.0.3/go.mod h1:MN3ve08Z3zSV/rTuX/ouI4lNdlfTxgdafQJiLzyNRB8=
 github.com/anacrolix/log v0.14.2/go.mod h1:1OmJESOtxQGNMlUO5rcv96Vpp9mfMqXXbe2RdinFLdY=
-github.com/anacrolix/log v0.16.0 h1:DSuyb5kAJwl3Y0X1TRcStVrTS9ST9b0BHW+7neE4Xho=
-github.com/anacrolix/log v0.16.0/go.mod h1:m0poRtlr41mriZlXBQ9SOVZ8yZBkLjOkDhd5Li5pITA=
+github.com/anacrolix/log v0.17.0 h1:cZvEGRPCbIg+WK+qAxWj/ap2Gj8cx1haOCSVxNZQpK4=
+github.com/anacrolix/log v0.17.0/go.mod h1:m0poRtlr41mriZlXBQ9SOVZ8yZBkLjOkDhd5Li5pITA=
 github.com/anacrolix/upnp v0.1.4 h1:+2t2KA6QOhm/49zeNyeVwDu1ZYS9dB9wfxyVvh/wk7U=
 github.com/anacrolix/upnp v0.1.4/go.mod h1:Qyhbqo69gwNWvEk1xNTXsS5j7hMHef9hdr984+9fIic=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=

@@ -5,7 +5,7 @@ go 1.24.2
 toolchain go1.24.4
 
 require (
-	github.com/anacrolix/log v0.16.0
+	github.com/anacrolix/log v0.17.0
 	github.com/anacrolix/upnp v0.1.4
 	github.com/gopacket/gopacket v1.4.0
 	github.com/jackpal/gateway v1.1.1
