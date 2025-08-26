@@ -11,7 +11,7 @@ require (
 	github.com/jackpal/gateway v1.1.1
 	github.com/miekg/dns v1.1.68
 	github.com/sagernet/sing v0.7.5
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.0
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.35.0
 	golang.org/x/time v0.12.0
