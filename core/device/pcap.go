@@ -32,6 +32,7 @@ type PCAP struct {
 	handle     *pcap.Handle
 	ipMacTable map[string]net.HardwareAddr
 	Interface  net.Interface
+	mtu        uint32 // Configured MTU (may differ from Interface.MTU)
 	rMux       sync.Mutex
 	stacker    func() Stacker
 
@@ -77,6 +78,7 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, ifce net.Interface, netConfi
 		network:    netConfig.Network,
 		localIP:    netConfig.LocalIP,
 		localMAC:   netConfig.LocalMAC,
+		mtu:        netConfig.MTU,
 		handle:     pcaph,
 		ipMacTable: make(map[string]net.HardwareAddr),
 	}
@@ -96,6 +98,16 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, ifce net.Interface, netConfi
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
 	t.ep = ep
+
+	// Set up ICMP sender for MTU discovery
+	icmpSender := &pcapICMPSender{
+		writer:     t,
+		localMAC:   netConfig.LocalMAC,
+		localIP:    netConfig.LocalIP,
+		ipMacTable: t.ipMacTable,
+	}
+	ep.SetICMPSender(icmpSender)
+
 	// we are in L2 and using ethernet header
 	t.Endpoint = ethernet.New(ep)
 
@@ -177,6 +189,17 @@ func (t *PCAP) Read() []byte {
 		if !t.network.Contains(srcAddress.AsSlice()) {
 			return nil
 		}
+
+		// Filter out ICMP from our gateway (loop prevention)
+		// We send ICMP, promiscuous mode reads it back
+		if bytes.Compare(srcAddress.AsSlice(), t.localIP) == 0 {
+			if ipProtocol.Protocol() == uint8(header.ICMPv4ProtocolNumber) {
+				slog.Debug("[ICMP] Filtering out our own ICMP (loop prevention)",
+					"src", srcAddress)
+				return nil
+			}
+		}
+
 		if bytes.Compare(srcAddress.AsSlice(), t.localIP) != 0 {
 			t.SetHardwareAddr(srcAddress.AsSlice(), []byte(ethProtocol.SourceAddress()))
 		}
@@ -210,6 +233,12 @@ func (t *PCAP) Write(p []byte) (n int, err error) {
 	// Capture outgoing packet if debug is enabled
 	if t.debugCapture != nil {
 		t.debugCapture.CaptureOutgoingPacket(p)
+	}
+
+	// Debug: Parse and log outgoing packet
+	if slog.Default().Enabled(nil, slog.LevelDebug) && len(p) > 14 {
+		packet := gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default)
+		slog.Debug("WRITE packet", "packet", packet.String())
 	}
 
 	err = t.handle.WritePacketData(p)

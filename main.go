@@ -328,15 +328,9 @@ func calculateRecommendedMTU(mtu uint32) uint32 {
 	const ethernetHeaderSize = 14
 	const ipv4HeaderSize = 20
 	const tcpHeaderSize = 20
-	const pppoeHeaderSize = 8
 
 	// Account for common overhead
 	recommendedMTU := mtu - ethernetHeaderSize - ipv4HeaderSize - tcpHeaderSize
-
-	// Common values
-	if recommendedMTU > 1500-pppoeHeaderSize {
-		recommendedMTU = 1500 - pppoeHeaderSize // PPPoE environments
-	}
 
 	return recommendedMTU
 }
