@@ -42,7 +42,7 @@ type PCAP struct {
 
 const offset = 0
 
-func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, stacker func() Stacker) (_ Device, err error) {
+func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, stacker func() Stacker) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("open tun: %v", r)
@@ -65,8 +65,27 @@ func Open(pcapCfg cfg.PCAP, captureCfg cfg.Capture, ifce net.Interface, netConfi
 		return nil, fmt.Errorf("open live error: %w", err)
 	}
 
-	//arp or src net 172.24.2.0/24
-	err = pcaph.SetBPFFilter(fmt.Sprintf("arp or src net %s", netConfig.Network.String()))
+	// BPF filter breakdown:
+	// 1. ARP packets: (arp dst host <localIP> and arp src net <network> and not arp src host <localIP>)
+	//    - Only ARP requests TO us (arp dst host)
+	//    - From devices in our network (arp src net)
+	//    - Not from ourselves (not arp src host) - loop prevention
+	// 2. IPv4 packets: (src net <network> and not (icmp and src host <localIP>))
+	//    - All IPv4 packets from the configured network
+	//    - Exclude ICMP from ourselves (loop prevention in promiscuous mode)
+	//
+	// ARP field access in BPF:
+	// - "arp src host X" / "arp src net X" - checks Source Protocol Address (SPA) field
+	// - "arp dst host X" / "arp dst net X" - checks Target Protocol Address (TPA) field
+	bpfFilter := fmt.Sprintf(
+		"(arp dst host %s and arp src net %s and not arp src host %s) or (src net %s and not (icmp and src host %s))",
+		netConfig.LocalIP.String(),
+		netConfig.Network.String(),
+		netConfig.LocalIP.String(),
+		netConfig.Network.String(),
+		netConfig.LocalIP.String(),
+	)
+	err = pcaph.SetBPFFilter(bpfFilter)
 	if err != nil {
 		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}
@@ -190,16 +209,6 @@ func (t *PCAP) Read() []byte {
 			return nil
 		}
 
-		// Filter out ICMP from our gateway (loop prevention)
-		// We send ICMP, promiscuous mode reads it back
-		if bytes.Compare(srcAddress.AsSlice(), t.localIP) == 0 {
-			if ipProtocol.Protocol() == uint8(header.ICMPv4ProtocolNumber) {
-				slog.Debug("[ICMP] Filtering out our own ICMP (loop prevention)",
-					"src", srcAddress)
-				return nil
-			}
-		}
-
 		if bytes.Compare(srcAddress.AsSlice(), t.localIP) != 0 {
 			t.SetHardwareAddr(srcAddress.AsSlice(), []byte(ethProtocol.SourceAddress()))
 		}
@@ -212,8 +221,8 @@ func (t *PCAP) Read() []byte {
 
 		srcIP := net.IP(arpLayer.SourceProtAddress)
 		dstIP := net.IP(arpLayer.DstProtAddress)
-		// //gvisor handle arp requests, but we should filter out arp requests from the expected network
-		// cant use gvisor check due spoofing
+
+		// Same like in BPF filter
 		if bytes.Compare(srcIP, t.localIP) != 0 &&
 			bytes.Compare(dstIP, t.localIP) == 0 &&
 			t.network.Contains(srcIP) {

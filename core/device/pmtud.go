@@ -135,7 +135,7 @@ func (s *pcapICMPSender) SendICMPFragmentationNeeded(srcIP, dstIP []byte, mtu ui
 		return fmt.Errorf("failed to write Ethernet frame: %w", err)
 	}
 
-	slog.Info("[ICMP] Sent ICMP Fragmentation Needed via Ethernet",
+	slog.Debug("[ICMP] Sent ICMP Fragmentation Needed via Ethernet",
 		"src_ip", s.localIP.String(), // Gateway IP
 		"dst_ip", fmt.Sprintf("%d.%d.%d.%d", srcIP[0], srcIP[1], srcIP[2], srcIP[3]),
 		"dst_mac", dstMAC.String(),

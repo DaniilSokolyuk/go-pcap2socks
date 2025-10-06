@@ -164,7 +164,7 @@ func run(cfg *cfg.Config) error {
 	_defaultProxy = proxy.NewRouter(cfg.Routing.Rules, proxies)
 	proxy.SetDialer(_defaultProxy)
 
-	_defaultDevice, err = device.Open(cfg.PCAP, cfg.Capture, ifce, netConfig, func() device.Stacker {
+	_defaultDevice, err = device.Open(cfg.Capture, ifce, netConfig, func() device.Stacker {
 		return _defaultStack
 	})
 	if err != nil {
