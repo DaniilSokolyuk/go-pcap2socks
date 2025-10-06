@@ -81,11 +81,14 @@ func (s *pcapICMPSender) SendICMPFragmentationNeeded(srcIP, dstIP []byte, mtu ui
 	}
 
 	// Create ICMP layer
-	// For Type 3 Code 4: Id=unused(0), Seq=MTU
+	// RFC 1191 (Path MTU Discovery): "the router MUST include the MTU of
+	// that next-hop network in the low-order 16 bits of the ICMP header
+	// field that is labelled 'unused' in the ICMP specification"
+	// gopacket maps: Id field = high-order 16 bits (unused=0), Seq field = low-order 16 bits (MTU)
 	icmpLayer := &layers.ICMPv4{
-		TypeCode: layers.CreateICMPv4TypeCode(3, 4), // Fragmentation Needed
-		Id:       0,                                 // unused
-		Seq:      uint16(mtu),                       // MTU goes in Seq field!
+		TypeCode: layers.CreateICMPv4TypeCode(3, 4), // Type 3 Code 4: Fragmentation Needed
+		Id:       0,                                 // High-order 16 bits: unused (must be 0)
+		Seq:      uint16(mtu),                       // Low-order 16 bits: Next-Hop MTU (RFC 1191)
 	}
 
 	// Serialize with Ethernet layer included (like ARP does)
@@ -94,6 +97,16 @@ func (s *pcapICMPSender) SendICMPFragmentationNeeded(srcIP, dstIP []byte, mtu ui
 		ComputeChecksums: true,
 		FixLengths:       true,
 	}
+
+	//0                   1                   2                   3
+	//0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+	//+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	//|   Type = 3    |   Code = 4    |           Checksum            |
+	//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	//|           unused = 0          |         Next-Hop MTU          |
+	//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	//|      Internet Header + 64 bits of Original Datagram Data      |
+	//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 	// Payload is original IP header + 8 bytes of data (no manual MTU bytes needed)
 	err := gopacket.SerializeLayers(buffer, opts,
