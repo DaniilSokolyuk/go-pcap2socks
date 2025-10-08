@@ -118,15 +118,6 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, 
 	}
 	t.ep = ep
 
-	// Set up ICMP sender for MTU discovery
-	icmpSender := &pcapICMPSender{
-		writer:     t,
-		localMAC:   netConfig.LocalMAC,
-		localIP:    netConfig.LocalIP,
-		ipMacTable: t.ipMacTable,
-	}
-	ep.SetICMPSender(icmpSender)
-
 	// we are in L2 and using ethernet header
 	t.Endpoint = ethernet.New(ep)
 
