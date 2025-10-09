@@ -21,10 +21,9 @@ import (
 )
 
 type PCAP struct {
-	*ethernet.Endpoint
+	stack.LinkEndpoint
 
 	name string
-	ep   *iobased.Endpoint
 
 	network    *net.IPNet
 	localIP    net.IP
@@ -35,9 +34,6 @@ type PCAP struct {
 	mtu        uint32 // Configured MTU (may differ from Interface.MTU)
 	rMux       sync.Mutex
 	stacker    func() Stacker
-
-	// Debug PCAP capture
-	debugCapture *DebugCapture
 }
 
 const offset = 0
@@ -102,24 +98,23 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, 
 		ipMacTable: make(map[string]net.HardwareAddr),
 	}
 
-	// Setup PCAP capture if enabled
-	if captureCfg.Enabled && captureCfg.TargetIP != "" {
-		debugCapture, err := NewDebugCapture(captureCfg.TargetIP, captureCfg.OutputFile)
-		if err != nil {
-			slog.Error("Failed to setup PCAP capture", "error", err)
-		} else {
-			t.debugCapture = debugCapture
-		}
-	}
-
 	ep, err := iobased.New(t, netConfig.MTU, offset, t.localMAC)
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
-	t.ep = ep
 
 	// we are in L2 and using ethernet header
-	t.Endpoint = ethernet.New(ep)
+	t.LinkEndpoint = ethernet.New(ep)
+
+	// Setup PCAP capture if enabled
+	if captureCfg.Enabled {
+		snifferEp, err := NewEthSniffer(t.LinkEndpoint, captureCfg.OutputFile)
+		if err != nil {
+			slog.Error("Failed to setup PCAP capture", "error", err)
+		} else {
+			t.LinkEndpoint = snifferEp
+		}
+	}
 
 	// send gratuitous arp
 	{
@@ -174,21 +169,10 @@ func createPcapHandle(dev pcap.Interface) (*pcap.InactiveHandle, error) {
 func (t *PCAP) Read() []byte {
 	t.rMux.Lock()
 	defer t.rMux.Unlock()
-	data, ci, err := t.handle.ZeroCopyReadPacketData()
+	data, _, err := t.handle.ZeroCopyReadPacketData()
 	if err != nil {
 		slog.Error("read packet error: %w", slog.Any("err", err))
 		return nil
-	}
-
-	// Debug: Parse and log incoming packet
-	if slog.Default().Enabled(nil, slog.LevelDebug) && len(data) > 14 {
-		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
-		slog.Debug("READ packet", "packet", packet.String())
-	}
-
-	// Capture packet if debug is enabled
-	if t.debugCapture != nil {
-		t.debugCapture.CapturePacket(data, ci)
 	}
 
 	ethProtocol := header.Ethernet(data)
@@ -230,17 +214,6 @@ func (t *PCAP) Read() []byte {
 }
 
 func (t *PCAP) Write(p []byte) (n int, err error) {
-	// Capture outgoing packet if debug is enabled
-	if t.debugCapture != nil {
-		t.debugCapture.CaptureOutgoingPacket(p)
-	}
-
-	// Debug: Parse and log outgoing packet
-	if slog.Default().Enabled(nil, slog.LevelDebug) && len(p) > 14 {
-		packet := gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default)
-		slog.Debug("WRITE packet", "packet", packet.String())
-	}
-
 	err = t.handle.WritePacketData(p)
 	if err != nil {
 		slog.Error("write packet error: %w", slog.Any("err", err))
@@ -255,13 +228,8 @@ func (t *PCAP) Name() string {
 }
 
 func (t *PCAP) Close() {
-	defer t.ep.Close()
 	t.handle.Close()
-
-	// Close debug capture if enabled
-	if t.debugCapture != nil {
-		t.debugCapture.Close()
-	}
+	t.LinkEndpoint.Close() // Cascade close: sniffer → ethernet → iobased
 }
 
 func (t *PCAP) Type() string {

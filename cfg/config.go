@@ -109,7 +109,6 @@ type DNS struct {
 
 type Capture struct {
 	Enabled    bool   `json:"enabled"`
-	TargetIP   string `json:"targetIP"`
 	OutputFile string `json:"outputFile"`
 }
 

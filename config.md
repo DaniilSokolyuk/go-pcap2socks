@@ -276,12 +276,11 @@ Blocks matching traffic.
 
 ## capture
 
-Debug feature for capturing packets to a file for analysis.
+Debug feature for capturing packets to a file for analysis. Captures all Ethernet frames (including MAC addresses) for troubleshooting.
 
 ```json
 "capture": {
   "enabled": true,
-  "targetIP": "172.26.0.5",
   "outputFile": "capture-debug.pcap"
 }
 ```
@@ -294,16 +293,11 @@ Debug feature for capturing packets to a file for analysis.
   - Default: false
   - Description: Enable/disable packet capture
 
-- **targetIP**
-  - Type: String
-  - Required: Yes (when enabled)
-  - Description: IP address to capture packets from
-
 - **outputFile**
   - Type: String
-  - Required: Yes (when enabled)
-  - Default: "debug-capture.pcap"
-  - Description: Path to save captured packets
+  - Optional: Yes
+  - Default: "capture_YYYYMMDD_HHMMSS.pcap"
+  - Description: Path to save captured packets. Timestamp is automatically appended to prevent overwriting
 
 ## Complete Example Configurations
 
@@ -488,7 +482,6 @@ Debug feature for capturing packets to a file for analysis.
   ],
   "capture": {
     "enabled": true,
-    "targetIP": "172.26.0.5",
     "outputFile": "debug-session.pcap"
   }
 }
