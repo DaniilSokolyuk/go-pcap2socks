@@ -326,11 +326,9 @@ func calculateIPRange(network *net.IPNet, gatewayIP net.IP) (start, end net.IP) 
 // calculateRecommendedMTU returns a recommended MTU value
 func calculateRecommendedMTU(mtu uint32) uint32 {
 	const ethernetHeaderSize = 14
-	const ipv4HeaderSize = 20
-	const tcpHeaderSize = 20
 
 	// Account for common overhead
-	recommendedMTU := mtu - ethernetHeaderSize - ipv4HeaderSize - tcpHeaderSize
+	recommendedMTU := mtu - ethernetHeaderSize
 
 	return recommendedMTU
 }
