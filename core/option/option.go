@@ -44,7 +44,7 @@ const (
 	tcpSACKEnabled = true
 
 	// tcpRecovery is the loss detection algorithm used by TCP.
-	tcpRecovery = tcpip.TCPRACKLossDetection
+	tcpRecovery = tcpip.TCPRecovery(0)
 
 	// TCP Receive (RX) buffer sizes - for incoming data
 	// Min is unused by gVisor at the time of writing, but partially plumbed
@@ -250,8 +250,6 @@ func WithTCPSACKEnabled(v bool) Option {
 // WithTCPRecovery sets the recovery option for TCP.
 func WithTCPRecovery(v tcpip.TCPRecovery) Option {
 	return func(s *stack.Stack) error {
-		v = tcpip.TCPRecovery(0)
-
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &v); err != nil {
 			return fmt.Errorf("set TCP Recovery: %s", err)
 		}

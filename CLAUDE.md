@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-go-pcap2socks is a PCAP-based proxy that redirects network traffic from any device (XBOX, PlayStation, Nintendo Switch, mobile phones, etc.) to a SOCKS5 proxy server. It operates at Layer 2 using packet capture and a gVisor TCP/IP stack to intercept and route traffic.
+go-pcap2socks functions like a router, allowing you to connect various devices such as an **XBOX**, **PlayStation (PS4, PS5)**, **Nintendo Switch**, mobile phones, printers and others to any SOCKS5 proxy server. Additionally, you can just start go-pcap2socks with the default direct outbound to share your VPN connection to any devices on your network.
 
 ## Build & Development Commands
 
@@ -73,7 +73,6 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 
 **Device Layer (core/device/)**
 - `pcap.go`: PCAP device implementation using gopacket/pcap for Layer 2 packet capture
-- `pmtud.go`: Path MTU Discovery implementation (sends ICMP Type 3 Code 4 messages)
 - `device.go`: Device interface abstraction
 - `iobased/endpoint.go`: I/O based endpoint for gVisor integration with MTU enforcement and ICMPSender interface
 - Handles gratuitous ARP, MAC address learning, and BPF filtering
@@ -146,38 +145,3 @@ Config supports:
 - **Unix-like**: Uses CGO for pcap, platform-specific socket options
 - **Darwin**: Special handling for interface gateway discovery
 - Socket options vary per platform (IP_BOUND_IF, SO_BINDTODEVICE, etc.)
-
-### MTU Discovery
-
-The application includes automatic MTU discovery to help devices correctly determine the maximum transmission unit:
-
-**gVisor Automatic MSS Calculation**:
-- gVisor TCP/IP stack automatically calculates advertised MSS based on endpoint MTU
-- MSS = MTU - 40 (IP header 20 + TCP header 20)
-- Configured via `netConfig.MTU` passed to `iobased.New()`
-- No manual MSS clamping needed - gVisor handles it correctly
-- See `gvisor/pkg/tcpip/transport/tcp/endpoint.go:calculateAdvertisedMSS()`
-
-**Path MTU Discovery (PMTUD) via ICMP (core/device/pmtud.go)**:
-- `ICMPSender` interface defined in `iobased/endpoint.go` for sending ICMP messages
-- `pcapICMPSender` struct in `pmtud.go` implements the interface for PCAP-based sending
-- Sends ICMP Type 3 Code 4 (Fragmentation Needed) when packets exceed MTU
-- Constructs complete Ethernet frames with ICMP payload at Layer 2
-- ICMP payload includes original IP header + 8 bytes of data per RFC 792
-- MTU value encoded in ICMP Seq field (Id field unused per RFC)
-- Requires MAC address lookup from learned IP-MAC table
-- Handles dynamic MTU discovery for networks with varying MTU
-
-**Implementation Details**:
-- MTU configured in `cfg.PCAP.MTU` (config.json) or defaults to interface MTU
-- Stored in `PCAP.mtu` field (may differ from `Interface.MTU`)
-- Passed to gVisor stack via `iobased.New(rw, netConfig.MTU, offset, localMAC)`
-- `iobased.Endpoint` defines `ICMPSender` interface and detects oversized packets in `dispatchLoop()`
-- `pcapICMPSender` (core/device/pmtud.go) constructs Ethernet+IP+ICMP frames
-- Uses `gopacket` to serialize layers with automatic checksum calculation
-- Loop prevention: filters out self-generated ICMP packets in promiscuous mode
-- Debug logging shows MTU-related events when `SLOG_LEVEL=debug`
-
-**Logging**:
-- `[MTU]` prefix for MTU discovery events
-- `[ICMP]` prefix for ICMP message operations
