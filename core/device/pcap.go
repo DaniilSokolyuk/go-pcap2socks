@@ -21,10 +21,9 @@ import (
 )
 
 type PCAP struct {
-	*ethernet.Endpoint
+	stack.LinkEndpoint
 
 	name string
-	ep   *iobased.Endpoint
 
 	network    *net.IPNet
 	localIP    net.IP
@@ -35,9 +34,6 @@ type PCAP struct {
 	mtu        uint32 // Configured MTU (may differ from Interface.MTU)
 	rMux       sync.Mutex
 	stacker    func() Stacker
-
-	// Debug PCAP capture
-	debugCapture *DebugCapture
 }
 
 const offset = 0
@@ -70,18 +66,20 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, 
 	//    - Only ARP requests TO us (arp dst host)
 	//    - From devices in our network (arp src net)
 	//    - Not from ourselves (not arp src host) - loop prevention
-	// 2. IPv4 packets: (src net <network> and not (icmp and src host <localIP>))
+	// 2. IPv4 packets: (src net <network> and not dst net <network> and not (icmp and src host <localIP>))
 	//    - All IPv4 packets from the configured network
+	//    - Not destined to the local network (only capture internet-bound traffic)
 	//    - Exclude ICMP from ourselves (loop prevention in promiscuous mode)
 	//
 	// ARP field access in BPF:
 	// - "arp src host X" / "arp src net X" - checks Source Protocol Address (SPA) field
 	// - "arp dst host X" / "arp dst net X" - checks Target Protocol Address (TPA) field
 	bpfFilter := fmt.Sprintf(
-		"(arp dst host %s and arp src net %s and not arp src host %s) or (src net %s and not (icmp and src host %s))",
+		"(arp dst host %s and arp src net %s and not arp src host %s) or (src net %s and not dst net %s and not (icmp and src host %s))",
 		netConfig.LocalIP.String(),
 		netConfig.Network.String(),
 		netConfig.LocalIP.String(),
+		netConfig.Network.String(),
 		netConfig.Network.String(),
 		netConfig.LocalIP.String(),
 	)
@@ -102,33 +100,23 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, 
 		ipMacTable: make(map[string]net.HardwareAddr),
 	}
 
-	// Setup PCAP capture if enabled
-	if captureCfg.Enabled && captureCfg.TargetIP != "" {
-		debugCapture, err := NewDebugCapture(captureCfg.TargetIP, captureCfg.OutputFile)
-		if err != nil {
-			slog.Error("Failed to setup PCAP capture", "error", err)
-		} else {
-			t.debugCapture = debugCapture
-		}
-	}
-
 	ep, err := iobased.New(t, netConfig.MTU, offset, t.localMAC)
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
-	t.ep = ep
-
-	// Set up ICMP sender for MTU discovery
-	icmpSender := &pcapICMPSender{
-		writer:     t,
-		localMAC:   netConfig.LocalMAC,
-		localIP:    netConfig.LocalIP,
-		ipMacTable: t.ipMacTable,
-	}
-	ep.SetICMPSender(icmpSender)
 
 	// we are in L2 and using ethernet header
-	t.Endpoint = ethernet.New(ep)
+	t.LinkEndpoint = ethernet.New(ep)
+
+	// Setup PCAP capture if enabled
+	if captureCfg.Enabled {
+		snifferEp, err := NewEthSniffer(t.LinkEndpoint, captureCfg.OutputFile)
+		if err != nil {
+			slog.Error("Failed to setup PCAP capture", "error", err)
+		} else {
+			t.LinkEndpoint = snifferEp
+		}
+	}
 
 	// send gratuitous arp
 	{
@@ -183,21 +171,10 @@ func createPcapHandle(dev pcap.Interface) (*pcap.InactiveHandle, error) {
 func (t *PCAP) Read() []byte {
 	t.rMux.Lock()
 	defer t.rMux.Unlock()
-	data, ci, err := t.handle.ZeroCopyReadPacketData()
+	data, _, err := t.handle.ZeroCopyReadPacketData()
 	if err != nil {
 		slog.Error("read packet error: %w", slog.Any("err", err))
 		return nil
-	}
-
-	// Debug: Parse and log incoming packet
-	if slog.Default().Enabled(nil, slog.LevelDebug) && len(data) > 14 {
-		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
-		slog.Debug("READ packet", "packet", packet.String())
-	}
-
-	// Capture packet if debug is enabled
-	if t.debugCapture != nil {
-		t.debugCapture.CapturePacket(data, ci)
 	}
 
 	ethProtocol := header.Ethernet(data)
@@ -239,17 +216,6 @@ func (t *PCAP) Read() []byte {
 }
 
 func (t *PCAP) Write(p []byte) (n int, err error) {
-	// Capture outgoing packet if debug is enabled
-	if t.debugCapture != nil {
-		t.debugCapture.CaptureOutgoingPacket(p)
-	}
-
-	// Debug: Parse and log outgoing packet
-	if slog.Default().Enabled(nil, slog.LevelDebug) && len(p) > 14 {
-		packet := gopacket.NewPacket(p, layers.LayerTypeEthernet, gopacket.Default)
-		slog.Debug("WRITE packet", "packet", packet.String())
-	}
-
 	err = t.handle.WritePacketData(p)
 	if err != nil {
 		slog.Error("write packet error: %w", slog.Any("err", err))
@@ -264,13 +230,8 @@ func (t *PCAP) Name() string {
 }
 
 func (t *PCAP) Close() {
-	defer t.ep.Close()
 	t.handle.Close()
-
-	// Close debug capture if enabled
-	if t.debugCapture != nil {
-		t.debugCapture.Close()
-	}
+	t.LinkEndpoint.Close() // Cascade close: sniffer → ethernet → iobased
 }
 
 func (t *PCAP) Type() string {

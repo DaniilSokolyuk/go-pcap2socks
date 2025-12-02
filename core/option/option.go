@@ -2,7 +2,6 @@ package option
 
 import (
 	"fmt"
-	"runtime"
 
 	"golang.org/x/time/rate"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -29,7 +28,7 @@ const (
 	icmpLimit rate.Limit = 1000
 
 	// tcpCongestionControl is the congestion control algorithm used by
-	// stack. ccReno is the default option in gVisor stack.
+	// stack. CUBIC is much faster than Reno for high-bandwidth networks.
 	tcpCongestionControlAlgorithm = "reno" // "reno" or "cubic"
 
 	// tcpDelayEnabled is the value used by stack to enable or disable
@@ -38,28 +37,32 @@ const (
 
 	// tcpModerateReceiveBufferEnabled is the value used by stack to
 	// enable or disable tcp receive buffer auto-tuning option.
-	tcpModerateReceiveBufferEnabled = false
+	tcpModerateReceiveBufferEnabled = true
 
 	// tcpSACKEnabled is the value used by stack to enable or disable
 	// tcp selective ACK.
 	tcpSACKEnabled = true
 
 	// tcpRecovery is the loss detection algorithm used by TCP.
-	tcpRecovery = tcpip.TCPRACKLossDetection
+	tcpRecovery = tcpip.TCPRecovery(0)
 
-	// tcpMinBufferSize is the smallest size of a send/recv buffer.
-	tcpMinBufferSize = tcp.MinBufferSize
+	// TCP Receive (RX) buffer sizes - for incoming data
+	// Min is unused by gVisor at the time of writing, but partially plumbed
+	// for application by the TCP_WINDOW_CLAMP socket option.
+	tcpRXBufMinSize = tcp.MinBufferSize
+	// Default is used by gVisor at socket creation.
+	tcpRXBufDefSize = tcp.DefaultReceiveBufferSize
+	// Max is used by gVisor to cap the advertised receive window post-read
+	// when tcp_moderate_rcvbuf=true (the default).
+	tcpRXBufMaxSize = 8 << 20 // 8MiB
 
-	// tcpMaxBufferSize is the maximum permitted size of a send/recv buffer.
-	tcpMaxBufferSize = tcp.MaxBufferSize
-
-	// tcpDefaultBufferSize is the default size of the send buffer for
-	// a transport endpoint.
-	tcpDefaultSendBufferSize = tcp.DefaultSendBufferSize
-
-	// tcpDefaultReceiveBufferSize is the default size of the receive buffer
-	// for a transport endpoint.
-	tcpDefaultReceiveBufferSize = tcp.DefaultReceiveBufferSize
+	// TCP Transmit (TX) buffer sizes - for outgoing data
+	// Min is unused by gVisor at the time of writing.
+	tcpTXBufMinSize = tcp.MinBufferSize
+	// Default is used by gVisor at socket creation.
+	tcpTXBufDefSize = tcp.DefaultSendBufferSize
+	// Max is used by gVisor to cap the send window.
+	tcpTXBufMaxSize = 6 << 20 // 6MiB
 )
 
 type Option func(*stack.Stack) error
@@ -79,8 +82,8 @@ func WithDefault() Option {
 			// in too large buffers.
 			//
 			// Ref: https://github.com/cloudflare/slirpnetstack/blob/master/stack.go
-			WithTCPSendBufferSizeRange(tcpMinBufferSize, tcpDefaultSendBufferSize, tcpMaxBufferSize),
-			WithTCPReceiveBufferSizeRange(tcpMinBufferSize, tcpDefaultReceiveBufferSize, tcpMaxBufferSize),
+			WithTCPSendBufferSizeRange(tcpTXBufMinSize, tcpTXBufDefSize, tcpTXBufMaxSize),
+			WithTCPReceiveBufferSizeRange(tcpRXBufMinSize, tcpRXBufDefSize, tcpRXBufMaxSize),
 
 			WithTCPCongestionControl(tcpCongestionControlAlgorithm),
 			WithTCPDelay(tcpDelayEnabled),
@@ -160,44 +163,40 @@ func WithICMPLimit(limit rate.Limit) Option {
 	}
 }
 
-// WithTCPSendBufferSize sets default the send buffer size for TCP.
-func WithTCPSendBufferSize(size int) Option {
-	return func(s *stack.Stack) error {
-		sndOpt := tcpip.TCPSendBufferSizeRangeOption{Min: tcpMinBufferSize, Default: size, Max: tcpMaxBufferSize}
-		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &sndOpt); err != nil {
-			return fmt.Errorf("set TCP send buffer size range: %s", err)
-		}
-		return nil
-	}
-}
-
 // WithTCPSendBufferSizeRange sets the send buffer size range for TCP.
-func WithTCPSendBufferSizeRange(a, b, c int) Option {
+// Inspired by Tailscale's implementation.
+func WithTCPSendBufferSizeRange(min, def, max int) Option {
 	return func(s *stack.Stack) error {
-		sndOpt := tcpip.TCPSendBufferSizeRangeOption{Min: a, Default: b, Max: c}
-		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &sndOpt); err != nil {
-			return fmt.Errorf("set TCP send buffer size range: %s", err)
+		opt := tcpip.TCPSendBufferSizeRangeOption{
+			// Min is unused by gVisor at the time of writing.
+			Min: min,
+			// Default is used by gVisor at socket creation.
+			Default: def,
+			// Max is used by gVisor to cap the send window.
+			Max: max,
 		}
-		return nil
-	}
-}
-
-// WithTCPReceiveBufferSize sets the default receive buffer size for TCP.
-func WithTCPReceiveBufferSize(size int) Option {
-	return func(s *stack.Stack) error {
-		rcvOpt := tcpip.TCPReceiveBufferSizeRangeOption{Min: tcpMinBufferSize, Default: size, Max: tcpMaxBufferSize}
-		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcvOpt); err != nil {
-			return fmt.Errorf("set TCP receive buffer size range: %s", err)
+		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
+			return fmt.Errorf("set TCP send buffer size range: %s", err)
 		}
 		return nil
 	}
 }
 
 // WithTCPReceiveBufferSizeRange sets the receive buffer size range for TCP.
-func WithTCPReceiveBufferSizeRange(a, b, c int) Option {
+// Inspired by Tailscale's implementation.
+func WithTCPReceiveBufferSizeRange(min, def, max int) Option {
 	return func(s *stack.Stack) error {
-		rcvOpt := tcpip.TCPReceiveBufferSizeRangeOption{Min: a, Default: b, Max: c}
-		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcvOpt); err != nil {
+		opt := tcpip.TCPReceiveBufferSizeRangeOption{
+			// Min is unused by gVisor at the time of writing, but partially plumbed
+			// for application by the TCP_WINDOW_CLAMP socket option.
+			Min: min,
+			// Default is used by gVisor at socket creation.
+			Default: def,
+			// Max is used by gVisor to cap the advertised receive window post-read
+			// when tcp_moderate_rcvbuf=true (the default).
+			Max: max,
+		}
+		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
 			return fmt.Errorf("set TCP receive buffer size range: %s", err)
 		}
 		return nil
@@ -251,14 +250,6 @@ func WithTCPSACKEnabled(v bool) Option {
 // WithTCPRecovery sets the recovery option for TCP.
 func WithTCPRecovery(v tcpip.TCPRecovery) Option {
 	return func(s *stack.Stack) error {
-		if runtime.GOOS == "windows" {
-			// See https://github.com/tailscale/tailscale/issues/9707
-			// Windows w/RACK performs poorly. ACKs do not appear to be handled in a
-			// timely manner, leading to spurious retransmissions and a reduced
-			// congestion window.
-			v = tcpip.TCPRecovery(0)
-		}
-
 		if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &v); err != nil {
 			return fmt.Errorf("set TCP Recovery: %s", err)
 		}

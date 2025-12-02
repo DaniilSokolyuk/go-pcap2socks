@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"sync"
 
@@ -39,14 +38,6 @@ type Endpoint struct {
 
 	// wg keeps track of running goroutines.
 	wg sync.WaitGroup
-
-	// icmpSender is used to send ICMP messages for MTU discovery
-	icmpSender ICMPSender
-}
-
-// ICMPSender is an interface for sending ICMP messages
-type ICMPSender interface {
-	SendICMPFragmentationNeeded(srcIP, dstIP []byte, mtu uint32, originalPacket []byte) error
 }
 
 // New returns stack.LinkEndpoint(.*Endpoint) and error.
@@ -69,16 +60,10 @@ func New(rw ReadWriter, mtu uint32, offset int, mac net.HardwareAddr) (*Endpoint
 	}
 
 	return &Endpoint{
-		Endpoint:   channel.New(defaultOutQueueLen, mtu, linkAddr),
-		rw:         rw,
-		mtu:        mtu,
-		icmpSender: nil, // Will be set later via SetICMPSender
+		Endpoint: channel.New(defaultOutQueueLen, mtu, linkAddr),
+		rw:       rw,
+		mtu:      mtu,
 	}, nil
-}
-
-// SetICMPSender sets the ICMP sender for this endpoint.
-func (e *Endpoint) SetICMPSender(sender ICMPSender) {
-	e.icmpSender = sender
 }
 
 // Attach launches the goroutine that reads packets from io.Reader and
@@ -109,47 +94,9 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 	// gracefully after (*Endpoint).dispatchLoop(context.CancelFunc) returns.
 	defer cancel()
 
-	mtu := int(e.mtu)
-
 	for {
 		data := e.rw.Read()
 		if len(data) == 0 {
-			continue
-		}
-
-		if len(data) > mtu {
-			// Packet is too large for MTU - send ICMP Fragmentation Needed
-			// Note: data includes Ethernet header (14 bytes), skip it to get IP packet
-			const ethernetHeaderSize = 14
-			if e.icmpSender != nil && len(data) >= ethernetHeaderSize+header.IPv4MinimumSize {
-				// Skip Ethernet header to get IP packet
-				ipPacket := data[ethernetHeaderSize:]
-				ipHeader := header.IPv4(ipPacket)
-				if ipHeader.IsValid(len(ipPacket)) {
-					srcAddr := ipHeader.SourceAddress()
-					dstAddr := ipHeader.DestinationAddress()
-					srcIP := srcAddr.As4()
-					dstIP := dstAddr.As4()
-
-					// Send ICMP Fragmentation Needed to inform sender about MTU
-					// Subtract Ethernet header from MTU since ICMP MTU is at IP level
-					ipMTU := e.mtu - ethernetHeaderSize
-					err := e.icmpSender.SendICMPFragmentationNeeded(srcIP[:], dstIP[:], ipMTU, ipPacket)
-					if err != nil {
-						slog.Debug("[MTU] Failed to send ICMP Fragmentation Needed", "error", err)
-					} else {
-						slog.Debug("[MTU] Packet too large, sent ICMP Fragmentation Needed",
-							"packet_size", len(data),
-							"mtu", e.mtu,
-							"ip_mtu", ipMTU,
-							"src", srcIP,
-							"dst", dstIP,
-							"df_flag", (ipHeader.Flags()&header.IPv4FlagDontFragment) != 0)
-					}
-				}
-			}
-
-			slog.Debug("[MTU] Dropping packet larger than MTU", "packet_size", len(data), "mtu", e.mtu)
 			continue
 		}
 
@@ -158,8 +105,7 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 		}
 
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Payload:           buffer.MakeWithData(data),
-			IsForwardedPacket: true,
+			Payload: buffer.MakeWithData(data),
 		})
 
 		e.InjectInbound(header.EthernetProtocolAll, pkt)
