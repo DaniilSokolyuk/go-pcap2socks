@@ -66,18 +66,20 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, 
 	//    - Only ARP requests TO us (arp dst host)
 	//    - From devices in our network (arp src net)
 	//    - Not from ourselves (not arp src host) - loop prevention
-	// 2. IPv4 packets: (src net <network> and not (icmp and src host <localIP>))
+	// 2. IPv4 packets: (src net <network> and not dst net <network> and not (icmp and src host <localIP>))
 	//    - All IPv4 packets from the configured network
+	//    - Not destined to the local network (only capture internet-bound traffic)
 	//    - Exclude ICMP from ourselves (loop prevention in promiscuous mode)
 	//
 	// ARP field access in BPF:
 	// - "arp src host X" / "arp src net X" - checks Source Protocol Address (SPA) field
 	// - "arp dst host X" / "arp dst net X" - checks Target Protocol Address (TPA) field
 	bpfFilter := fmt.Sprintf(
-		"(arp dst host %s and arp src net %s and not arp src host %s) or (src net %s and not (icmp and src host %s))",
+		"(arp dst host %s and arp src net %s and not arp src host %s) or (src net %s and not dst net %s and not (icmp and src host %s))",
 		netConfig.LocalIP.String(),
 		netConfig.Network.String(),
 		netConfig.LocalIP.String(),
+		netConfig.Network.String(),
 		netConfig.Network.String(),
 		netConfig.LocalIP.String(),
 	)
