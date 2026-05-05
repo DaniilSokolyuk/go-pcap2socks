@@ -8,7 +8,7 @@ require (
 	github.com/gopacket/gopacket v1.5.0
 	github.com/jackpal/gateway v1.1.1
 	github.com/miekg/dns v1.1.68
-	github.com/sagernet/sing v0.7.12
+	github.com/sagernet/sing v0.8.9
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.38.0
