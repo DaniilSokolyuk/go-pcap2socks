@@ -81,7 +81,7 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 **Tunnel (tunnel/)**
 - `tunnel.go`: Manages TCP/UDP connection queues and dispatches connections to handlers
 - `tcp.go`: TCP connection handling with bidirectional streaming and half-close support
-- `udp.go`: UDP session management with UPnP port mapping support
+- `udp.go`: UDP session management with bidirectional pipe and idle timeout
 - `addr.go`: Address parsing utilities
 
 **Proxy Layer (proxy/)**
@@ -118,7 +118,7 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 3. **Stack Processing**: gVisor stack processes IP packets and dispatches to protocol handlers
 4. **Connection Handling**:
    - TCP: Queued to `_tcpQueue`, handled by `handleTCPConn`
-   - UDP: Handled by `HandleUDPConn` with NAT and UPnP support
+   - UDP: Handled by `HandleUDPConn` with bidirectional packet relay and idle timeout
 5. **Routing**: Router matches rules based on src/dst IP/port and selects outbound
 6. **Proxy**: Selected proxy (direct/socks5/reject/dns) establishes connection
 7. **Bidirectional Copy**: Data is copied between client and remote connections
