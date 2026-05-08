@@ -1,6 +1,6 @@
 module github.com/DaniilSokolyuk/go-pcap2socks
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/anacrolix/log v0.17.0
@@ -11,7 +11,7 @@ require (
 	github.com/sagernet/sing v0.7.12
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/atomic v1.11.0
-	golang.org/x/sys v0.38.0
+	golang.org/x/sys v0.44.0
 	golang.org/x/time v0.14.0
 	gvisor.dev/gvisor v0.0.0-20251007062105-0520b1c18dd1
 )
