@@ -14,7 +14,10 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime"
+	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -23,20 +26,33 @@ import (
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
-	"github.com/jackpal/gateway" 
-	"gvisor.dev/gvisor/pkg/tcpip"
-    "gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
-    "gvisor.dev/gvisor/pkg/tcpip/stack"
+	"github.com/jackpal/gateway"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
 //go:embed config.json
 var configData string
 
 var (
-    _defaultDevice device.Device
-    _defaultStack  *stack.Stack
-    _currentCfg    *cfg.Config
+	stackMu        sync.RWMutex
+	_defaultDevice device.Device
+	_defaultStack  *stack.Stack
+	_currentCfg    *cfg.Config
 )
+
+// getStack returns the current stack under a read lock. It is used by the
+// device's stacker() callback, which may run concurrently with hot reload.
+func getStack() *stack.Stack {
+	stackMu.RLock()
+	defer stackMu.RUnlock()
+	return _defaultStack
+}
+
+func setStack(s *stack.Stack) {
+	stackMu.Lock()
+	_defaultStack = s
+	stackMu.Unlock()
+}
 
 func main() {
 	logLevel := slog.LevelInfo
@@ -159,8 +175,8 @@ func run(cfg *cfg.Config) error {
 	router := proxy.NewRouter(cfg.Routing.Rules, proxies)
 	proxy.SetDialer(router)
 
-	dev, err := device.Open(cfg.Capture, ifce, netConfig, func() device.Stacker {
-		return _defaultStack
+	dev, err := device.Open(cfg.Capture, cfg.DNS, ifce, netConfig, func() device.Stacker {
+		return getStack()
 	})
 	if err != nil {
 		return err
@@ -176,12 +192,7 @@ func run(cfg *cfg.Config) error {
 	if err != nil {
 		return fmt.Errorf("create stack: %w", err)
 	}
-	_defaultStack = stack
-
-	recoveryOpt := tcpip.TCPRecovery(0)
-	if err := _defaultStack.SetTransportProtocolOption(tcp.ProtocolNumber, &recoveryOpt); err != nil {
-    return fmt.Errorf("failed to disable RACK: %w", err)
-}
+	setStack(stack)
 
 	_currentCfg = cfg
 	return nil
@@ -197,27 +208,62 @@ func watchConfig(cfgFile string) {
 	}
 	defer watcher.Close()
 
-	if err := watcher.Add(cfgFile); err != nil {
-		slog.Error("watch config file error", slog.Any("file", cfgFile), slog.Any("err", err))
+	absCfgFile, err := filepath.Abs(cfgFile)
+	if err != nil {
+		slog.Error("resolve config path error", slog.Any("file", cfgFile), slog.Any("err", err))
 		return
 	}
-	slog.Info("Watching config file for changes", "file", cfgFile)
+	dir := filepath.Dir(absCfgFile)
 
+	// Watch the directory, not the file itself. Many editors (VS Code, and
+	// vim/nano in their default "safe write" mode) save by writing a new
+	// temp file and renaming it over the original instead of writing the
+	// original file in place. That replaces the file's inode, which
+	// silently kills an inotify watch placed directly on the file - no
+	// further events ever fire and hot-reload goes dark with no log
+	// output at all. Watching the directory and filtering by filename
+	// survives that.
+	if err := watcher.Add(dir); err != nil {
+		slog.Error("watch config dir error", slog.Any("dir", dir), slog.Any("err", err))
+		return
+	}
+	slog.Info("Watching config file for changes", "file", absCfgFile)
+
+	var reloadMu sync.Mutex
+	reload := func() {
+		reloadMu.Lock()
+		defer reloadMu.Unlock()
+
+		slog.Info("Config file changed, reloading...", "file", absCfgFile)
+		newCfg, err := cfg.Load(absCfgFile)
+		if err != nil {
+			slog.Error("reload config error", slog.Any("err", err))
+			return
+		}
+		applyHotReload(newCfg)
+	}
+
+	// A single "save" from an editor can fire several events in a row
+	// (e.g. CREATE of the temp file, then RENAME/CREATE onto the target,
+	// sometimes a CHMOD). Debounce so we reload once per save instead of
+	// once per event.
+	var debounce *time.Timer
 	for {
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return
 			}
-			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-				slog.Info("Config file changed, reloading...", "file", cfgFile)
-				newCfg, err := cfg.Load(cfgFile)
-				if err != nil {
-					slog.Error("reload config error", slog.Any("err", err))
-					continue
-				}
-				applyHotReload(newCfg)
+			if filepath.Clean(event.Name) != absCfgFile {
+				continue
 			}
+			if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
+				continue
+			}
+			if debounce != nil {
+				debounce.Stop()
+			}
+			debounce = time.AfterFunc(150*time.Millisecond, reload)
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
@@ -298,14 +344,16 @@ func buildRouter(cfg *cfg.Config) (proxy.Proxy, error) {
 }
 
 func restartStack(cfg *cfg.Config) error {
-	// 1. Закрываем старые
-	if _defaultStack != nil {
-		_defaultStack.Close()
-		_defaultStack = nil
-	}
+	// 1. Закрываем старые: СНАЧАЛА устройство (останавливает read/write
+	// циклы и горутины), ПОТОМ стек. Обратный порядок позволяет старым
+	// горутинам инжектить пакеты в уже закрытый стек (гонки/паники).
 	if _defaultDevice != nil {
 		_defaultDevice.Close()
 		_defaultDevice = nil
+	}
+	if s := getStack(); s != nil {
+		setStack(nil)
+		s.Close()
 	}
 
 	// 2. Находим интерфейс заново
@@ -316,8 +364,8 @@ func restartStack(cfg *cfg.Config) error {
 	}
 
 	// 3. Создаём устройство и стек
-	dev, err := device.Open(cfg.Capture, ifce, netConfig, func() device.Stacker {
-		return _defaultStack
+	dev, err := device.Open(cfg.Capture, cfg.DNS, ifce, netConfig, func() device.Stacker {
+		return getStack()
 	})
 	if err != nil {
 		return fmt.Errorf("open device: %w", err)
@@ -333,7 +381,7 @@ func restartStack(cfg *cfg.Config) error {
 	if err != nil {
 		return fmt.Errorf("create stack: %w", err)
 	}
-	_defaultStack = stack
+	setStack(stack)
 	return nil
 }
 

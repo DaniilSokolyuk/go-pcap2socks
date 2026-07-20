@@ -64,12 +64,17 @@ type dnsConn struct {
 
 func (d *dnsConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
 	msg := <-d.answerCh
-	_, err = msg.PackBuffer(b)
+	packed, err := msg.PackBuffer(b)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	return msg.Len(), d.m.UDPAddr(), nil
+	// PackBuffer may allocate a new buffer if b is too small - in that
+	// case the data is NOT in b and must be copied (and truncated to
+	// fit). Returning msg.Len() (an estimate) instead of the real packed
+	// size corrupts responses.
+	n = copy(b, packed)
+	return n, d.m.UDPAddr(), nil
 }
 
 func (d *dnsConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
