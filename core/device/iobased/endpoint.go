@@ -20,7 +20,7 @@ import (
 const (
 	// Queue length for outbound packet, arriving for read. Overflow
 	// causes packet drops.
-	defaultOutQueueLen = 1 << 10
+	defaultOutQueueLen = 1 << 12
 )
 
 // Endpoint implements the interface of stack.LinkEndpoint from io.ReadWriter.
@@ -95,7 +95,12 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 	defer cancel()
 
 	for {
-		data := e.rw.Read()
+		data, err := e.rw.Read()
+		if err != nil {
+			// Fatal read error (device closed or pcap failure).
+			// Exit the loop instead of spinning at 100% CPU.
+			break
+		}
 		if len(data) == 0 {
 			continue
 		}
@@ -141,5 +146,8 @@ func (e *Endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
 
 type ReadWriter interface {
 	io.Writer
-	Read() []byte
+	// Read returns the next inbound packet. A nil slice with nil error
+	// means the packet was filtered and should be skipped. A non-nil
+	// error is fatal and stops the dispatch loop.
+	Read() ([]byte, error)
 }

@@ -5,10 +5,10 @@ import (
 
 	"golang.org/x/time/rate"
 	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
-	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
+    "gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
+    "gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
+    "gvisor.dev/gvisor/pkg/tcpip/stack"
+    "gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 )
 
 const (
@@ -29,7 +29,7 @@ const (
 
 	// tcpCongestionControl is the congestion control algorithm used by
 	// stack. CUBIC is much faster than Reno for high-bandwidth networks.
-	tcpCongestionControlAlgorithm = "reno" // "reno" or "cubic"
+	tcpCongestionControlAlgorithm = "cubic" // "reno" or "cubic"
 
 	// tcpDelayEnabled is the value used by stack to enable or disable
 	// tcp delay option. Disable Nagle's algorithm here by default.
@@ -44,7 +44,11 @@ const (
 	tcpSACKEnabled = true
 
 	// tcpRecovery is the loss detection algorithm used by TCP.
-	tcpRecovery = tcpip.TCPRecovery(0)
+	// RACK (Recent ACKnowledgment, RFC 8985) is gVisor's default and
+	// recovers from packet loss much faster than classic dup-ACK/RTO,
+	// which is critical on Wi-Fi and other lossy links. Disabling it
+	// causes throughput collapse and instability under packet loss.
+	tcpRecovery = tcpip.TCPRACKLossDetection
 
 	// TCP Receive (RX) buffer sizes - for incoming data
 	// Min is unused by gVisor at the time of writing, but partially plumbed
@@ -54,7 +58,7 @@ const (
 	tcpRXBufDefSize = tcp.DefaultReceiveBufferSize
 	// Max is used by gVisor to cap the advertised receive window post-read
 	// when tcp_moderate_rcvbuf=true (the default).
-	tcpRXBufMaxSize = 8 << 20 // 8MiB
+	tcpRXBufMaxSize = 32 << 20 // 32MiB
 
 	// TCP Transmit (TX) buffer sizes - for outgoing data
 	// Min is unused by gVisor at the time of writing.
@@ -62,7 +66,7 @@ const (
 	// Default is used by gVisor at socket creation.
 	tcpTXBufDefSize = tcp.DefaultSendBufferSize
 	// Max is used by gVisor to cap the send window.
-	tcpTXBufMaxSize = 6 << 20 // 6MiB
+	tcpTXBufMaxSize = 32 << 20 // 32MiB
 )
 
 type Option func(*stack.Stack) error

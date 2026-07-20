@@ -103,5 +103,6 @@ func CreateStack(cfg *Config) (*stack.Stack, error) {
 			return nil, err
 		}
 	}
-	return s, nil
+
+return s, nil
 }

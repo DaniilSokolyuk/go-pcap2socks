@@ -6,13 +6,13 @@ import (
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 
-	glog "gvisor.dev/gvisor/pkg/log"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
-	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
-	"gvisor.dev/gvisor/pkg/waiter"
+	"gvisor.dev/gvisor/pkg/log"      // ← было log "gvisor.dev/gvisor/pkg/log"
+    "gvisor.dev/gvisor/pkg/tcpip"
+    "gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+    "gvisor.dev/gvisor/pkg/tcpip/header"
+    "gvisor.dev/gvisor/pkg/tcpip/stack"
+    "gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
+    "gvisor.dev/gvisor/pkg/waiter"
 )
 
 const (
@@ -39,11 +39,13 @@ const (
 	// tcpKeepaliveInterval specifies the interval
 	// time between sending TCP keepalive packets.
 	tcpKeepaliveInterval = 30 * time.Second
+
+	defaultOutQueueLen = 4096
 )
 
 func withTCPHandler(handle func(adapter.TCPConn)) option.Option {
 	return func(s *stack.Stack) error {
-		tcpForwarder := tcp.NewForwarder(s, defaultWndSize, maxConnAttempts, func(r *tcp.ForwarderRequest) {
+		tcpForwarder := tcp.NewForwarder(s, defaultWndSize, defaultOutQueueLen, func(r *tcp.ForwarderRequest) {
 			var (
 				wq  waiter.Queue
 				ep  tcpip.Endpoint
@@ -53,7 +55,7 @@ func withTCPHandler(handle func(adapter.TCPConn)) option.Option {
 
 			defer func() {
 				if err != nil {
-					glog.Debugf("forward tcp request: %s:%d->%s:%d: %s",
+					log.Debugf("forward tcp request: %s:%d->%s:%d: %s",
 						id.RemoteAddress, id.RemotePort, id.LocalAddress, id.LocalPort, err)
 				}
 			}()
@@ -84,11 +86,6 @@ func setSocketOptions(s *stack.Stack, ep tcpip.Endpoint) tcpip.Error {
 	{ /* TCP keepalive options */
 		ep.SocketOptions().SetKeepAlive(true)
 
-		idle := tcpip.KeepaliveIdleOption(tcpKeepaliveIdle)
-		if err := ep.SetSockOpt(&idle); err != nil {
-			return err
-		}
-
 		interval := tcpip.KeepaliveIntervalOption(tcpKeepaliveInterval)
 		if err := ep.SetSockOpt(&interval); err != nil {
 			return err
@@ -98,6 +95,10 @@ func setSocketOptions(s *stack.Stack, ep tcpip.Endpoint) tcpip.Error {
 			return err
 		}
 	}
+
+	// Отключаем алгоритм Нейгла (TCP_NODELAY)
+	ep.SocketOptions().SetDelayOption(false)
+
 	{ /* TCP recv/send buffer size */
 		var ss tcpip.TCPSendBufferSizeRangeOption
 		if err := s.TransportProtocolOption(header.TCPProtocolNumber, &ss); err == nil {
@@ -109,6 +110,7 @@ func setSocketOptions(s *stack.Stack, ep tcpip.Endpoint) tcpip.Error {
 			ep.SocketOptions().SetReceiveBufferSize(int64(rs.Default), false)
 		}
 	}
+
 	return nil
 }
 

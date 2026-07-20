@@ -11,18 +11,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DaniilSokolyuk/go-pcap2socks/tunnel"
-	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/common/udpnat"
-
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/md"
 	MM "github.com/DaniilSokolyuk/go-pcap2socks/md"
+	"github.com/DaniilSokolyuk/go-pcap2socks/tunnel"
+	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	udpnat "github.com/sagernet/sing/common/udpnat2"
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/checksum"
@@ -31,33 +30,29 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 )
 
-type Handler interface {
-	N.UDPConnectionHandler
-	E.Handler
-}
-
 type handler struct {
 	handle func(adapter.UDPConn)
 }
 
-func (h handler) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata M.Metadata) error {
-	h.handle(proxyHandler{meta: metadata, conn: conn})
-	return nil
-}
-
-func (h handler) NewError(ctx context.Context, err error) {
-	slog.Error("udp PacketConnection proxy error: ", slog.Any("err", err))
-}
-
-func CreateProxyHandler(a func(adapter.UDPConn)) Handler {
-	return &handler{
-		handle: a,
+func (h handler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
+	h.handle(proxyHandler{
+		conn:        conn,
+		source:      source,
+		destination: destination,
+	})
+	if onClose != nil {
+		onClose(nil)
 	}
 }
 
+func CreateProxyHandler(a func(adapter.UDPConn)) N.UDPConnectionHandlerEx {
+	return handler{handle: a}
+}
+
 type proxyHandler struct {
-	conn N.PacketConn
-	meta M.Metadata
+	conn        N.PacketConn
+	source      M.Socksaddr
+	destination M.Socksaddr
 }
 
 func (ph proxyHandler) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
@@ -108,20 +103,18 @@ func (ph proxyHandler) SetWriteDeadline(t time.Time) error {
 }
 
 func (ph proxyHandler) MD() *metadata.Metadata {
-	mh := &MM.Metadata{
+	return &MM.Metadata{
 		Network: MM.UDP,
-		SrcIP:   net.IP(ph.meta.Source.Addr.AsSlice()),
-		SrcPort: ph.meta.Source.Port,
-		DstIP:   net.IP(ph.meta.Destination.Addr.AsSlice()),
-		DstPort: ph.meta.Destination.Port,
+		SrcIP:   net.IP(ph.source.Addr.AsSlice()),
+		SrcPort: ph.source.Port,
+		DstIP:   net.IP(ph.destination.Addr.AsSlice()),
+		DstPort: ph.destination.Port,
 	}
-
-	return mh
 }
 
 func withUDPNatHandler(handle func(adapter.UDPConn)) option.Option {
 	return func(s *stack.Stack) error {
-		udpForwarder := NewUDPForwarder(context.Background(), s, CreateProxyHandler(handle), int64(tunnel.UdpSessionTimeout.Seconds()))
+		udpForwarder := NewUDPForwarder(context.Background(), s, CreateProxyHandler(handle), tunnel.UdpSessionTimeout)
 		s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 		return nil
 	}
@@ -130,53 +123,42 @@ func withUDPNatHandler(handle func(adapter.UDPConn)) option.Option {
 type UDPForwarder struct {
 	ctx    context.Context
 	stack  *stack.Stack
-	udpNat *udpnat.Service[netip.AddrPort]
-
-	// cache
-	cacheProto tcpip.NetworkProtocolNumber
-	cacheID    stack.TransportEndpointID
+	udpNat *udpnat.Service
 }
 
-func NewUDPForwarder(ctx context.Context, stack *stack.Stack, handler Handler, udpTimeout int64) *UDPForwarder {
-	return &UDPForwarder{
-		ctx:    ctx,
-		stack:  stack,
-		udpNat: udpnat.New[netip.AddrPort](udpTimeout, handler),
+func NewUDPForwarder(ctx context.Context, stack *stack.Stack, handler N.UDPConnectionHandlerEx, udpTimeout time.Duration) *UDPForwarder {
+	f := &UDPForwarder{
+		ctx:   ctx,
+		stack: stack,
 	}
+	f.udpNat = udpnat.New(handler, f.prepare, udpTimeout, true)
+	return f
+}
+
+func (f *UDPForwarder) prepare(source M.Socksaddr, _ M.Socksaddr, _ any) (bool, context.Context, N.PacketWriter, N.CloseHandlerFunc) {
+	proto := header.IPv6ProtocolNumber
+	if source.IsIPv4() {
+		proto = header.IPv4ProtocolNumber
+	}
+	writer := &UDPBackWriter{
+		stack:         f.stack,
+		source:        AddressFromAddr(source.Addr),
+		sourcePort:    source.Port,
+		sourceNetwork: proto,
+	}
+	return true, f.ctx, writer, nil
 }
 
 func (f *UDPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
-	var upstreamMetadata M.Metadata
-	upstreamMetadata.Source = M.SocksaddrFrom(AddrFromAddress(id.RemoteAddress), id.RemotePort)
-	upstreamMetadata.Destination = M.SocksaddrFrom(AddrFromAddress(id.LocalAddress), id.LocalPort)
-	if upstreamMetadata.Source.IsIPv4() {
-		f.cacheProto = header.IPv4ProtocolNumber
-	} else {
-		f.cacheProto = header.IPv6ProtocolNumber
-	}
+	source := M.SocksaddrFrom(AddrFromAddress(id.RemoteAddress), id.RemotePort)
+	destination := M.SocksaddrFrom(AddrFromAddress(id.LocalAddress), id.LocalPort)
 	gBuffer := pkt.Data().ToBuffer()
-	sBuffer := buf.NewSize(int(gBuffer.Size()))
+	bufferSlices := make([][]byte, 0, 1)
 	gBuffer.Apply(func(view *buffer.View) {
-		sBuffer.Write(view.AsSlice())
+		bufferSlices = append(bufferSlices, view.AsSlice())
 	})
-	f.cacheID = id
-	f.udpNat.NewPacket(
-		f.ctx,
-		upstreamMetadata.Source.AddrPort(),
-		sBuffer,
-		upstreamMetadata,
-		f.newUDPConn,
-	)
+	f.udpNat.NewPacket(bufferSlices, source, destination, nil)
 	return true
-}
-
-func (f *UDPForwarder) newUDPConn(natConn N.PacketConn) N.PacketWriter {
-	return &UDPBackWriter{
-		stack:         f.stack,
-		source:        f.cacheID.RemoteAddress,
-		sourcePort:    f.cacheID.RemotePort,
-		sourceNetwork: f.cacheProto,
-	}
 }
 
 type UDPBackWriter struct {
