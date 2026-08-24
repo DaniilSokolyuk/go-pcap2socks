@@ -153,6 +153,7 @@ func (f *UDPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pac
 	source := M.SocksaddrFrom(AddrFromAddress(id.RemoteAddress), id.RemotePort)
 	destination := M.SocksaddrFrom(AddrFromAddress(id.LocalAddress), id.LocalPort)
 	gBuffer := pkt.Data().ToBuffer()
+	defer gBuffer.Release()
 	bufferSlices := make([][]byte, 0, 1)
 	gBuffer.Apply(func(view *buffer.View) {
 		bufferSlices = append(bufferSlices, view.AsSlice())
