@@ -62,7 +62,7 @@ func (b *ConfigBuilder) Rule(rule cfg.Rule) *ConfigBuilder {
 }
 
 // Build normalizes and returns the configuration.
-func (b *ConfigBuilder) Build(t *testing.T) *cfg.Config {
+func (b *ConfigBuilder) Build(t testing.TB) *cfg.Config {
 	t.Helper()
 
 	config := b.cfg

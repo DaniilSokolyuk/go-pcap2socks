@@ -16,6 +16,7 @@ import (
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device"
+	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/engine"
 )
 
@@ -43,6 +44,10 @@ type Harness struct {
 
 	Gateway netip.Addr
 
+	link         Link
+	lineToClient *wireLine
+	lineToDevice *wireLine
+
 	cancel   context.CancelFunc
 	done     chan struct{}
 	stopOnce sync.Once
@@ -53,10 +58,29 @@ type Harness struct {
 //
 // The engine uses process wide singletons (the tunnel queue and the default
 // proxy dialer), so harnesses must not run in parallel.
-func Start(t *testing.T, config *cfg.Config) *Harness {
+func Start(t testing.TB, config *cfg.Config) *Harness {
 	t.Helper()
 
-	h := StartRaw(t, config)
+	return StartWith(t, config, HarnessOptions{})
+}
+
+// HarnessOptions varies what Start builds. Functional tests want the zero
+// value; benchmarks use it to put a lossy, delayed wire under the console and
+// to override one stack setting at a time.
+type HarnessOptions struct {
+	// Link emulates the segment between console and engine.
+	Link Link
+
+	// StackOptions are applied after the engine's defaults, so they win.
+	StackOptions []option.Option
+}
+
+// StartWith is Start with the knobs benchmarks need.
+func StartWith(t testing.TB, config *cfg.Config, opts HarnessOptions) *Harness {
+	t.Helper()
+
+	h := startRawWith(t, config, opts.StackOptions)
+	h.link = opts.Link
 
 	_, network, err := net.ParseCIDR(DefaultNetwork)
 	if err != nil {
@@ -69,6 +93,11 @@ func Start(t *testing.T, config *cfg.Config) *Harness {
 		t.Fatalf("new client: %v", err)
 	}
 	h.Client = client
+
+	// Two independent seeds: a shared one would make the two directions drop
+	// in lockstep, which is not what a real segment does.
+	h.lineToClient = startLine(h.link, h.link.Seed, h.Client.InjectFrame)
+	h.lineToDevice = startLine(h.link, h.link.Seed+1, h.Source.Inject)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
@@ -93,7 +122,13 @@ func Start(t *testing.T, config *cfg.Config) *Harness {
 // StartRaw brings up an engine attached to an in-memory segment with nothing
 // else on it. Tests drive the wire themselves via h.Source, which is what link
 // layer tests need: no client stack competes for the emitted frames.
-func StartRaw(t *testing.T, config *cfg.Config) *Harness {
+func StartRaw(t testing.TB, config *cfg.Config) *Harness {
+	t.Helper()
+
+	return startRawWith(t, config, nil)
+}
+
+func startRawWith(t testing.TB, config *cfg.Config, stackOpts []option.Option) *Harness {
 	t.Helper()
 
 	gateway := netip.MustParseAddr(DefaultGatewayIP)
@@ -113,10 +148,11 @@ func StartRaw(t *testing.T, config *cfg.Config) *Harness {
 	source := device.NewMemSource(512)
 
 	eng, err := engine.Start(engine.Options{
-		Config:    config,
-		Interface: net.Interface{Name: "e2e0", MTU: defaultMTU, HardwareAddr: gatewayMAC},
-		Network:   netConfig,
-		Source:    source,
+		Config:       config,
+		Interface:    net.Interface{Name: "e2e0", MTU: defaultMTU, HardwareAddr: gatewayMAC},
+		Network:      netConfig,
+		Source:       source,
+		StackOptions: stackOpts,
 	})
 	if err != nil {
 		t.Fatalf("start engine: %v", err)
@@ -139,6 +175,8 @@ func StartRaw(t *testing.T, config *cfg.Config) *Harness {
 func (h *Harness) wire(ctx context.Context) {
 	defer close(h.done)
 
+	toClient, toDevice := h.lineToClient, h.lineToDevice
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -151,7 +189,7 @@ func (h *Harness) wire(ctx context.Context) {
 				if !ok {
 					return
 				}
-				h.Client.InjectFrame(frame)
+				toClient.send(frame)
 			case <-ctx.Done():
 				return
 			case <-h.Source.Done():
@@ -170,13 +208,17 @@ func (h *Harness) wire(ctx context.Context) {
 			}
 
 			view := pkt.ToView()
-			h.Source.Inject(view.AsSlice())
+			toDevice.send(view.AsSlice())
 			view.Release()
 			pkt.DecRef()
 		}
 	}()
 
 	wg.Wait()
+
+	// Only once both producers are gone, so nothing can still call send.
+	toClient.stop()
+	toDevice.stop()
 }
 
 // Stop tears the harness down. It is idempotent.
@@ -192,6 +234,19 @@ func (h *Harness) Stop() {
 	})
 }
 
+// TailDrops is how many frames the emulated bottleneck queue had no room for,
+// summed over both directions. It is congestion, not Link.Loss.
+func (h *Harness) TailDrops() uint64 {
+	var n uint64
+	if h.lineToClient != nil {
+		n += h.lineToClient.tailDrops.Load()
+	}
+	if h.lineToDevice != nil {
+		n += h.lineToDevice.tailDrops.Load()
+	}
+	return n
+}
+
 // ClientAddr returns the console's address with the given port.
 func (h *Harness) ClientAddr(port uint16) netip.AddrPort {
 	return netip.AddrPortFrom(h.Client.IP, port)
@@ -199,7 +254,7 @@ func (h *Harness) ClientAddr(port uint16) netip.AddrPort {
 
 // startEngineExpectingError starts an engine without a client and returns the
 // startup error. Used by tests that assert on configuration validation.
-func startEngineExpectingError(t *testing.T, config *cfg.Config) (*engine.Engine, error) {
+func startEngineExpectingError(t testing.TB, config *cfg.Config) (*engine.Engine, error) {
 	t.Helper()
 
 	_, network, err := net.ParseCIDR(DefaultNetwork)

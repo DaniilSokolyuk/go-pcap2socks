@@ -12,7 +12,7 @@ import (
 )
 
 // EchoTCP starts a TCP server on loopback that echoes everything back.
-func EchoTCP(t *testing.T) netip.AddrPort {
+func EchoTCP(t testing.TB) netip.AddrPort {
 	t.Helper()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -39,7 +39,7 @@ func EchoTCP(t *testing.T) netip.AddrPort {
 
 // EchoUDP starts a UDP server on loopback that echoes every datagram back to
 // its sender, prefixed with nothing: the payload is returned verbatim.
-func EchoUDP(t *testing.T) netip.AddrPort {
+func EchoUDP(t testing.TB) netip.AddrPort {
 	t.Helper()
 
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -66,7 +66,7 @@ func EchoUDP(t *testing.T) netip.AddrPort {
 
 // DNSServer starts a DNS server on loopback answering every A query with the
 // given address.
-func DNSServer(t *testing.T, answer net.IP) netip.AddrPort {
+func DNSServer(t testing.TB, answer net.IP) netip.AddrPort {
 	t.Helper()
 
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -128,7 +128,7 @@ type SOCKS5Server struct {
 }
 
 // StartSOCKS5 starts the server on loopback. Empty user disables auth.
-func StartSOCKS5(t *testing.T, user, pass string) *SOCKS5Server {
+func StartSOCKS5(t testing.TB, user, pass string) *SOCKS5Server {
 	t.Helper()
 
 	return StartSOCKS5At(t, "127.0.0.1:0", user, pass)
@@ -137,7 +137,7 @@ func StartSOCKS5(t *testing.T, user, pass string) *SOCKS5Server {
 // StartSOCKS5At starts the server on a specific address. Tests that need the
 // proxy to be unreachable first and reachable later use it to come back up on
 // the address the engine was configured with.
-func StartSOCKS5At(t *testing.T, addr, user, pass string) *SOCKS5Server {
+func StartSOCKS5At(t testing.TB, addr, user, pass string) *SOCKS5Server {
 	t.Helper()
 
 	ln, err := net.Listen("tcp", addr)
@@ -401,7 +401,7 @@ func (s *SOCKS5Server) relayUDP(relay net.PacketConn) {
 	}
 }
 
-func mustAddrPort(t *testing.T, addr net.Addr) netip.AddrPort {
+func mustAddrPort(t testing.TB, addr net.Addr) netip.AddrPort {
 	t.Helper()
 
 	ap, err := netip.ParseAddrPort(addr.String())
@@ -410,4 +410,50 @@ func mustAddrPort(t *testing.T, addr net.Addr) netip.AddrPort {
 	}
 
 	return ap
+}
+
+// BulkTCP starts a TCP server on loopback that writes size bytes to every
+// connection and then closes it.
+//
+// It is the source for throughput benchmarks. The console downloads, so the
+// engine's stack is the sender and its congestion control is what the numbers
+// measure.
+func BulkTCP(t testing.TB, size int) netip.AddrPort {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen bulk tcp: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	payload := make([]byte, 64<<10)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				for sent := 0; sent < size; {
+					chunk := payload
+					if remaining := size - sent; remaining < len(chunk) {
+						chunk = chunk[:remaining]
+					}
+					n, err := conn.Write(chunk)
+					if err != nil {
+						return
+					}
+					sent += n
+				}
+			}()
+		}
+	}()
+
+	return mustAddrPort(t, ln.Addr())
 }

@@ -32,6 +32,11 @@ type Options struct {
 	// Source, when set, replaces the live pcap handle. Tests pass a
 	// device.MemSource here to run the whole engine without a pcap driver.
 	Source device.FrameSource
+
+	// StackOptions are applied after option.WithDefault, so they override it.
+	// Benchmarks use this to vary one stack setting at a time; production
+	// leaves it empty.
+	StackOptions []option.Option
 }
 
 // Engine is a running instance.
@@ -92,7 +97,7 @@ func Start(opts Options) (*Engine, error) {
 	s, err := core.CreateStack(&core.Config{
 		LinkEndpoint:     e.Device,
 		TransportHandler: &core.Tunnel{},
-		Options:          []option.Option{},
+		Options:          opts.StackOptions,
 	})
 	if err != nil {
 		e.Device.Close()

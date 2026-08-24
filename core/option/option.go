@@ -27,9 +27,20 @@ const (
 	// by this rate limiter.
 	icmpLimit rate.Limit = 1000
 
-	// tcpCongestionControl is the congestion control algorithm used by
-	// stack. CUBIC is much faster than Reno for high-bandwidth networks.
-	tcpCongestionControlAlgorithm = "reno" // "reno" or "cubic"
+	// tcpCongestionControl is the congestion control algorithm used by stack.
+	//
+	// CUBIC, measured against reno by e2e.BenchmarkLatencyUnderLoad on a
+	// 20Mbit/40ms link with a 128 frame queue: 21.4Mbit vs 8.7Mbit with a p90
+	// round trip of 45ms vs 91ms and no queue overflow at all, so it wins on
+	// throughput and on latency at the same time. Reno leaves half the link
+	// unused and still bufferbloats.
+	//
+	// Tailscale pins reno instead, citing an int overflow in gVisor's sender
+	// congestion window arithmetic that cubic triggers sooner
+	// (gvisor.dev/issue/11632). That is fixed in the gVisor this module
+	// requires - see the uint64 casts at tcp/snd.go cwndLimit - so the reason
+	// does not carry over. Recheck if that pin ever moves backwards.
+	tcpCongestionControlAlgorithm = "cubic" // "reno" or "cubic"
 
 	// tcpDelayEnabled is the value used by stack to enable or disable
 	// tcp delay option. Disable Nagle's algorithm here by default.
@@ -43,7 +54,34 @@ const (
 	// tcp selective ACK.
 	tcpSACKEnabled = true
 
-	// tcpRecovery is the loss detection algorithm used by TCP.
+	// tcpRecovery is the loss detection algorithm used by TCP. Zero disables
+	// RACK and leaves classic dup-ACK and RTO recovery.
+	//
+	// This is about gVisor's implementation, not about RACK. RACK-TLP
+	// (RFC 8985) is the better algorithm - it detects loss from send time
+	// rather than counting duplicate acknowledgements, so it survives
+	// reordering and catches tail loss - and it is the default both in Linux
+	// and in gVisor. Turning it off is the deviation, hence this comment.
+	//
+	// What makes it fragile here is that RACK is time based, and its input is
+	// when an acknowledgement arrived. A kernel stamps that in softirq; a
+	// userspace stack can leave the segment queued while a goroutine holds the
+	// endpoint lock flushing a window. That is precisely the bug behind
+	// Tailscale's own reason for disabling it (gvisor.dev/issue/9778,
+	// tailscale/tailscale#9707), and it is fixed in the gVisor this module
+	// requires - see tcp/rack.go, which now anchors measurements to segment
+	// ingress time. The numbers below are from after that fix.
+	//
+	// e2e.BenchmarkLatencyUnderLoad, same link as above: with cubic, RACK is a
+	// wash without loss and costs 19% of throughput at 0.5% loss (6.2 ->
+	// 5.0Mbit) while p90 latency does not move (42.4 -> 42.3ms). No upside was
+	// measured in any profile, so it stays off - not because the algorithm is
+	// wrong, but because it does not pay for itself on this stack yet.
+	//
+	// Worth rechecking on a gVisor bump. Note also that the benchmark delays
+	// frames with Go timers, whose millisecond granularity is exactly the
+	// input a time based algorithm is sensitive to, so it is the one setting
+	// this harness could plausibly be unfair to.
 	tcpRecovery = tcpip.TCPRecovery(0)
 
 	// TCP Receive (RX) buffer sizes - for incoming data
