@@ -10,6 +10,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,8 +43,9 @@ type Harness struct {
 
 	Gateway netip.Addr
 
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel   context.CancelFunc
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // Start brings up an engine with the given config, wires a fake console to it
@@ -67,12 +69,19 @@ func Start(t *testing.T, config *cfg.Config) *Harness {
 		t.Fatalf("new client: %v", err)
 	}
 	h.Client = client
-	t.Cleanup(client.Close)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	h.done = make(chan struct{})
 	go h.wire(ctx)
+
+	// t.Cleanup is LIFO, so this runs before the h.Stop that StartRaw
+	// registered. The wire pump has to be stopped before the client stack goes
+	// away, otherwise it can inject a frame into a closed stack.
+	t.Cleanup(func() {
+		h.Stop()
+		client.Close()
+	})
 
 	// The gratuitous ARP the device emits on open is already on the wire; give
 	// the pump a moment so tests start from a settled state.
@@ -125,11 +134,17 @@ func StartRaw(t *testing.T, config *cfg.Config) *Harness {
 }
 
 // wire moves frames between the client stack and the device's frame source.
+// h.done is closed only once both directions have stopped, so Stop can hand
+// back to the caller knowing nothing will touch the client stack again.
 func (h *Harness) wire(ctx context.Context) {
 	defer close(h.done)
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
 		// device -> client
+		defer wg.Done()
 		for {
 			select {
 			case frame, ok := <-h.Source.Outbound():
@@ -145,29 +160,36 @@ func (h *Harness) wire(ctx context.Context) {
 		}
 	}()
 
-	// client -> device
-	for {
-		pkt := h.Client.ch.ReadContext(ctx)
-		if pkt == nil {
-			return
-		}
+	go func() {
+		// client -> device
+		defer wg.Done()
+		for {
+			pkt := h.Client.ch.ReadContext(ctx)
+			if pkt == nil {
+				return
+			}
 
-		view := pkt.ToView()
-		h.Source.Inject(view.AsSlice())
-		view.Release()
-		pkt.DecRef()
-	}
+			view := pkt.ToView()
+			h.Source.Inject(view.AsSlice())
+			view.Release()
+			pkt.DecRef()
+		}
+	}()
+
+	wg.Wait()
 }
 
 // Stop tears the harness down. It is idempotent.
 func (h *Harness) Stop() {
-	if h.cancel != nil {
-		h.cancel()
-	}
-	_ = h.Engine.Close()
-	if h.done != nil {
-		<-h.done
-	}
+	h.stopOnce.Do(func() {
+		if h.cancel != nil {
+			h.cancel()
+		}
+		_ = h.Engine.Close()
+		if h.done != nil {
+			<-h.done
+		}
+	})
 }
 
 // ClientAddr returns the console's address with the given port.

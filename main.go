@@ -94,10 +94,16 @@ func run() error {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	slog.Info("Shutting down")
 
-	return nil
+	select {
+	case <-sig:
+		slog.Info("Shutting down")
+		return nil
+	case <-eng.Done():
+		// The capture died under us. Staying up would leave a process that
+		// looks healthy but routes nothing.
+		return fmt.Errorf("capture stopped")
+	}
 }
 
 func setupLogging() {

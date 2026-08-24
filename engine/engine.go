@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync/atomic"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
@@ -40,6 +41,13 @@ type Engine struct {
 	Proxy  proxy.Proxy
 }
 
+// Done is closed when the device stops reading frames. Callers that want to
+// exit when the capture dies - rather than keep running as a no-op router -
+// should select on it.
+func (e *Engine) Done() <-chan struct{} {
+	return e.Device.Done()
+}
+
 // Start builds the proxies, the device and the stack, and starts forwarding.
 //
 // Note that the tunnel and the default proxy dialer are process wide, so only
@@ -60,7 +68,17 @@ func Start(opts Options) (*Engine, error) {
 	e := &Engine{Proxy: router}
 	proxy.SetDialer(router)
 
-	stacker := func() device.Stacker { return e.Stack }
+	// The device starts dispatching as soon as CreateStack attaches the NIC,
+	// which is before the stack is assigned, so it is published separately and
+	// atomically. The device treats a nil Stacker as "not ready yet".
+	var built atomic.Pointer[stack.Stack]
+	stacker := func() device.Stacker {
+		s := built.Load()
+		if s == nil {
+			return nil
+		}
+		return s
+	}
 
 	if opts.Source != nil {
 		e.Device, err = device.OpenWithSource(opts.Config.Capture, opts.Source, "mem", opts.Network, stacker)
@@ -71,7 +89,7 @@ func Start(opts Options) (*Engine, error) {
 		return nil, fmt.Errorf("open device: %w", err)
 	}
 
-	e.Stack, err = core.CreateStack(&core.Config{
+	s, err := core.CreateStack(&core.Config{
 		LinkEndpoint:     e.Device,
 		TransportHandler: &core.Tunnel{},
 		Options:          []option.Option{},
@@ -80,6 +98,8 @@ func Start(opts Options) (*Engine, error) {
 		e.Device.Close()
 		return nil, fmt.Errorf("create stack: %w", err)
 	}
+	built.Store(s)
+	e.Stack = s
 
 	return e, nil
 }

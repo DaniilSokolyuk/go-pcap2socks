@@ -208,3 +208,91 @@ func TestBPFFilter(t *testing.T) {
 			"or (src net 172.26.0.0/16 and not dst net 172.26.0.0/16 and not (icmp and src host 172.26.0.1))",
 		filter)
 }
+
+// TestDeviceDropsRuntFrames pins a panic: the ethertype was read before any
+// length check, so anything shorter than an ethernet header took the process
+// down with a slice bounds error.
+func TestDeviceDropsRuntFrames(t *testing.T) {
+	dev, src, stacker := newTestDevice(t)
+
+	for size := 0; size < 14; size++ {
+		src.Inject(make([]byte, size))
+
+		got, err := dev.Read()
+		require.NoError(t, err, "size %d", size)
+		assert.Nil(t, got, "size %d must be dropped, not parsed", size)
+	}
+
+	assert.Empty(t, stacker.neighbors)
+}
+
+// TestDeviceDropsARPWithNonIPv4Addresses pins a second panic: an ARP body
+// declaring a 16 byte protocol address passed the network checks, because
+// net.IP comparisons normalize IPv4 mapped addresses, and then blew up in the
+// neighbor cache which only accepts 4 byte addresses.
+func TestDeviceDropsARPWithNonIPv4Addresses(t *testing.T) {
+	dev, src, stacker := newTestDevice(t)
+
+	eth := &layers.Ethernet{SrcMAC: testClientMAC, DstMAC: testGatewayMAC, EthernetType: layers.EthernetTypeARP}
+	arp := &layers.ARP{
+		AddrType: layers.LinkTypeEthernet, Protocol: layers.EthernetTypeIPv4,
+		Operation:       layers.ARPRequest,
+		SourceHwAddress: testClientMAC,
+		// 16 byte IPv4 mapped forms of the same addresses a valid frame carries.
+		SourceProtAddress: net.IP(testClientIP).To16(),
+		DstHwAddress:      net.HardwareAddr{0, 0, 0, 0, 0, 0},
+		DstProtAddress:    net.IP(testGatewayIP).To16(),
+	}
+
+	buf := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true}, eth, arp))
+	require.Equal(t, uint8(16), arp.ProtAddressSize, "the frame really does declare a 16 byte address")
+
+	src.Inject(buf.Bytes())
+
+	got, err := dev.Read()
+	require.NoError(t, err)
+	assert.Nil(t, got, "an ARP body that is not IPv4 over ethernet is dropped")
+	assert.Empty(t, stacker.neighbors)
+}
+
+// TestDeviceLearnsNothingBeforeTheStackExists covers the window between
+// attaching the NIC and the engine publishing the stack: the device must skip
+// the neighbor entry rather than call into a nil stack, and must still learn
+// the address on a later frame.
+func TestDeviceLearnsNothingBeforeTheStackExists(t *testing.T) {
+	_, network, err := net.ParseCIDR("172.26.0.0/16")
+	require.NoError(t, err)
+
+	src := NewMemSource(16)
+	stacker := &fakeStacker{neighbors: map[string]tcpip.LinkAddress{}}
+
+	var ready bool
+	dev, err := OpenWithSource(cfg.Capture{}, src, "mem", &NetworkConfig{
+		Network: network, LocalIP: testGatewayIP, LocalMAC: testGatewayMAC, MTU: 1500,
+	}, func() Stacker {
+		if !ready {
+			return nil
+		}
+		return stacker
+	})
+	require.NoError(t, err)
+	t.Cleanup(dev.Close)
+	<-src.Outbound()
+
+	frame := ipv4Frame(t, testClientMAC, testClientIP, net.IPv4(8, 8, 8, 8))
+
+	src.Inject(frame)
+	got, err := dev.(*ethDevice).Read()
+	require.NoError(t, err)
+	assert.Equal(t, frame, got, "the frame is still forwarded")
+	assert.Empty(t, stacker.neighbors)
+
+	ready = true
+
+	src.Inject(frame)
+	_, err = dev.(*ethDevice).Read()
+	require.NoError(t, err)
+	assert.Equal(t, tcpip.LinkAddress(testClientMAC), stacker.neighbors["172.26.0.5"],
+		"the address is learned once the stack is there")
+}

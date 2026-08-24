@@ -131,7 +131,16 @@ type SOCKS5Server struct {
 func StartSOCKS5(t *testing.T, user, pass string) *SOCKS5Server {
 	t.Helper()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	return StartSOCKS5At(t, "127.0.0.1:0", user, pass)
+}
+
+// StartSOCKS5At starts the server on a specific address. Tests that need the
+// proxy to be unreachable first and reachable later use it to come back up on
+// the address the engine was configured with.
+func StartSOCKS5At(t *testing.T, addr, user, pass string) *SOCKS5Server {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatalf("listen socks5: %v", err)
 	}

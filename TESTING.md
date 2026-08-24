@@ -93,6 +93,19 @@ destination survives the whole path intact.
   produced a frame with `ProtAddressSize: 16`.
 - `device.TestDeviceReadReportsClosedSource` - a closed source used to make the
   dispatch loop spin at 100% CPU instead of exiting.
+- `e2e.TestUDPRecoversAfterProxyDialFailure` - a failed proxy dial left the NAT
+  entry healthy and unread, so the client's source port stayed blackholed for as
+  long as it kept sending. Verified to fail (i/o timeout) without the fix.
+- `device.TestDeviceDropsRuntFrames` and
+  `device.TestDeviceDropsARPWithNonIPv4Addresses` - two panics reachable from
+  the wire: an ethertype read before any length check, and an ARP body
+  declaring a 16 byte protocol address reaching the neighbor cache. Both
+  verified to panic without the guards.
+- `device.TestDeviceLearnsNothingBeforeTheStackExists` - the device could call
+  into the stack during the window between the NIC being attached and the
+  engine publishing it.
+- `e2e.TestEngineDoneWhenSourceDies` - the dispatch loop swallowed the read
+  error, leaving a process that looked healthy but routed nothing.
 - `e2e.TestUDPSessionIsSharedAcrossDestinations` - the UDP NAT keys sessions on
   the source address only; this pins the behaviour across sing upgrades.
 - `proxy.TestRouterSelectsOutbound/criteria_are_ORed,_not_ANDed` - documents

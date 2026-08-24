@@ -34,6 +34,11 @@ func HandleUDPConn(uc adapter.UDPConn) {
 
 	pc, err := proxy.DialUDP(metadata)
 	if err != nil {
+		// Closing is not optional: the NAT entry stays healthy until this
+		// connection is closed, and every further packet from the same source
+		// refreshes its lifetime. Leaving it behind blackholes the client's
+		// source port for as long as it keeps sending.
+		uc.Close()
 		slog.Warn("[UDP] dial error: ", "error", err)
 		return
 	}

@@ -170,3 +170,56 @@ func TestUDPReject(t *testing.T) {
 	_, _, err = conn.ReadFrom(buf)
 	require.Error(t, err, "reject must not answer")
 }
+
+// TestUDPRecoversAfterProxyDialFailure pins the fix for a dial failure leaving
+// the source port blackholed: HandleUDPConn used to return without closing the
+// connection, so the NAT entry stayed healthy and every later packet from the
+// same port just refreshed its lifetime instead of retrying the proxy.
+func TestUDPRecoversAfterProxyDialFailure(t *testing.T) {
+	echo := EchoUDP(t)
+
+	// Reserve an address, then give it up: the proxy is unreachable at first
+	// and comes back on the very same address later.
+	proxyAddr := reserveAddr(t)
+
+	h := Start(t, NewConfig().Socks("", proxyAddr, "", "").Build(t))
+
+	conn, err := h.Client.DialUDP()
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// This one cannot go anywhere: nothing is listening on proxyAddr yet.
+	_, err = conn.WriteTo([]byte("lost"), udpAddr(t, fakeUDPDst))
+	require.NoError(t, err)
+
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
+	buf := make([]byte, 1500)
+	_, _, err = conn.ReadFrom(buf)
+	require.Error(t, err, "there is no proxy to answer yet")
+
+	socks := StartSOCKS5At(t, proxyAddr.String(), "", "")
+	socks.Upstream = echo
+
+	// Same socket, same source port: the session must be retried, not served
+	// from the stale NAT entry.
+	require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
+	want := []byte("ping")
+	_, err = conn.WriteTo(want, udpAddr(t, fakeUDPDst))
+	require.NoError(t, err)
+
+	n, _, err := conn.ReadFrom(buf)
+	require.NoError(t, err, "the source port must recover once the proxy is back")
+	assert.Equal(t, want, buf[:n])
+}
+
+// reserveAddr returns a loopback address that nothing is listening on.
+func reserveAddr(t *testing.T) netip.AddrPort {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := mustAddrPort(t, ln.Addr())
+	require.NoError(t, ln.Close())
+
+	return addr
+}

@@ -16,6 +16,10 @@ type Device interface {
 
 	// Type returns the driver type of the device.
 	Type() string
+
+	// Done is closed when the device stops reading frames: the source was
+	// closed or failed, and no further traffic will arrive.
+	Done() <-chan struct{}
 }
 
 // NetworkConfig holds the parsed network configuration

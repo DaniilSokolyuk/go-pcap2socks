@@ -32,6 +32,7 @@ type ethDevice struct {
 	localIP    net.IP
 	localMAC   net.HardwareAddr
 	src        FrameSource
+	ep         *iobased.Endpoint
 	ipMacTable map[string]net.HardwareAddr
 	mtu        uint32 // Configured MTU (may differ from Interface.MTU)
 	rMux       sync.Mutex
@@ -85,6 +86,8 @@ func OpenWithSource(captureCfg cfg.Capture, src FrameSource, typ string, netConf
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
 
+	t.ep = ep
+
 	// we are in L2 and using ethernet header
 	t.LinkEndpoint = ethernet.New(ep)
 
@@ -125,6 +128,12 @@ func (t *ethDevice) Read() ([]byte, error) {
 		return nil, err
 	}
 
+	// Nothing below this length has an ethertype to read, and header.Ethernet
+	// indexes into the slice without checking.
+	if len(data) < header.EthernetMinimumSize {
+		return nil, nil
+	}
+
 	ethProtocol := header.Ethernet(data)
 	switch ethProtocol.Type() {
 	case header.IPv4ProtocolNumber:
@@ -145,6 +154,15 @@ func (t *ethDevice) Read() ([]byte, error) {
 		gPckt := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 		arpLayer, isArp := gPckt.Layer(layers.LayerTypeARP).(*layers.ARP)
 		if !isArp {
+			return nil, nil
+		}
+
+		// The address sizes come straight off the wire. Only IPv4 over ethernet
+		// is ours to learn from, and the checks below would happily accept an
+		// IPv4 mapped 16 byte address that the neighbor cache then panics on.
+		if len(arpLayer.SourceProtAddress) != 4 ||
+			len(arpLayer.DstProtAddress) != 4 ||
+			len(arpLayer.SourceHwAddress) != 6 {
 			return nil, nil
 		}
 
@@ -188,13 +206,29 @@ func (t *ethDevice) Type() string {
 	return t.typ
 }
 
+// Done is closed when the device stops reading frames, either because it was
+// closed or because the frame source failed.
+func (t *ethDevice) Done() <-chan struct{} {
+	return t.ep.Done()
+}
+
 func (t *ethDevice) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
-	if _, ok := t.ipMacTable[string(srcIP)]; !ok {
-		slog.Info(fmt.Sprintf("Device %s (%s) joined the network", srcIP, srcMAC))
-		t.ipMacTable[string(srcIP)] = srcMAC
-		// after restart app some devices doesnt react to GratuitousArp, so we need to add them manually
-		t.stacker().AddStaticNeighbor(core.NicID, header.IPv4ProtocolNumber, tcpip.AddrFrom4Slice(srcIP), tcpip.LinkAddress(srcMAC))
+	if _, ok := t.ipMacTable[string(srcIP)]; ok {
+		return
 	}
+
+	// The stack only exists once the engine has finished building it, and the
+	// dispatch loop starts one step earlier. Frames arriving in that window are
+	// still forwarded; we just record nothing so the next one retries.
+	s := t.stacker()
+	if s == nil {
+		return
+	}
+
+	slog.Info(fmt.Sprintf("Device %s (%s) joined the network", srcIP, srcMAC))
+	t.ipMacTable[string(srcIP)] = srcMAC
+	// after restart app some devices doesnt react to GratuitousArp, so we need to add them manually
+	s.AddStaticNeighbor(core.NicID, header.IPv4ProtocolNumber, tcpip.AddrFrom4Slice(srcIP), tcpip.LinkAddress(srcMAC))
 }
 
 type Stacker interface {

@@ -164,3 +164,24 @@ func drain(h *Harness) {
 		}
 	}
 }
+
+// TestEngineDoneWhenSourceDies pins the fix for a dead capture going unnoticed:
+// the dispatch loop swallowed the read error and the process kept running as a
+// silent no-op router. The engine now reports it so main can exit.
+func TestEngineDoneWhenSourceDies(t *testing.T) {
+	h := StartRaw(t, NewConfig().Reject("").Build(t))
+
+	select {
+	case <-h.Engine.Done():
+		t.Fatal("the engine must not report a dead capture while the source is alive")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	require.NoError(t, h.Source.Close())
+
+	select {
+	case <-h.Engine.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a dead capture must be reported, not swallowed")
+	}
+}
