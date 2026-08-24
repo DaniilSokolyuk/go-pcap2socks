@@ -95,9 +95,14 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 	defer cancel()
 
 	for {
-		data := e.rw.Read()
+		data, err := e.rw.Read()
+		if err != nil {
+			// The source is gone; nothing left to dispatch.
+			return
+		}
+
 		if len(data) == 0 {
-			continue
+			continue /* filtered out by the device */
 		}
 
 		if !e.IsAttached() {
@@ -141,5 +146,9 @@ func (e *Endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
 
 type ReadWriter interface {
 	io.Writer
-	Read() []byte
+
+	// Read returns the next inbound frame. A nil frame with a nil error means
+	// the frame was dropped and reading should continue; a non-nil error
+	// terminates the dispatch loop.
+	Read() ([]byte, error)
 }

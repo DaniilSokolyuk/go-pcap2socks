@@ -5,12 +5,15 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	localdns "github.com/DaniilSokolyuk/go-pcap2socks/dns"
 	M "github.com/DaniilSokolyuk/go-pcap2socks/md"
 	"github.com/miekg/dns"
+	"github.com/sagernet/sing/common/pipe"
 )
 
 var _ Proxy = (*DNS)(nil)
@@ -22,11 +25,11 @@ type DNS struct {
 }
 
 func (d *DNS) Addr() string {
-	panic("implement me")
+	return "dns"
 }
 
 func (d *DNS) Mode() Mode {
-	panic("implement me")
+	return ModeDNS
 }
 
 func NewDNS(cfg cfg.DNS, interfaceName string) *DNS {
@@ -49,7 +52,9 @@ func (d *DNS) DialUDP(m *M.Metadata) (net.PacketConn, error) {
 		cfg:           d.cfg,
 		m:             m,
 		dnsClient:     d.dnsClient,
-		answerCh:      make(chan *dns.Msg),
+		answerCh:      make(chan *dns.Msg, 1),
+		done:          make(chan struct{}),
+		readDeadline:  pipe.MakeDeadline(),
 		interfaceName: d.interfaceName,
 	}, nil
 }
@@ -60,16 +65,27 @@ type dnsConn struct {
 	m             *M.Metadata
 	cfg           cfg.DNS
 	interfaceName string
+
+	done         chan struct{}
+	closeOnce    sync.Once
+	readDeadline pipe.Deadline
 }
 
 func (d *dnsConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
-	msg := <-d.answerCh
-	_, err = msg.PackBuffer(b)
-	if err != nil {
-		return 0, nil, err
+	select {
+	case msg := <-d.answerCh:
+		packed, err := msg.PackBuffer(b)
+		if err != nil {
+			return 0, nil, err
+		}
+		// PackBuffer may allocate a new slice when b is too small; copy is a
+		// no-op when it packed in place.
+		return copy(b, packed), d.m.UDPAddr(), nil
+	case <-d.done:
+		return 0, nil, net.ErrClosed
+	case <-d.readDeadline.Wait():
+		return 0, nil, os.ErrDeadlineExceeded
 	}
-
-	return msg.Len(), d.m.UDPAddr(), nil
 }
 
 func (d *dnsConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
@@ -79,59 +95,68 @@ func (d *dnsConn) WriteTo(b []byte, _ net.Addr) (n int, err error) {
 		return 0, err
 	}
 
-	go func() {
-		var response *dns.Msg
-		var lastErr error
-
-		for _, server := range d.cfg.Servers {
-			if server.Address == "local" {
-				localClient := localdns.NewLocalClient(d.interfaceName)
-				response, lastErr = localClient.Exchange(msg)
-				if lastErr == nil {
-					d.answerCh <- response
-					return
-				}
-				slog.Error("local dns exchange failed", slog.Any("err", lastErr))
-				continue
-			}
-
-			response, _, lastErr = d.dnsClient.Exchange(msg, server.Address)
-			if lastErr == nil {
-				d.answerCh <- response
-				return
-			}
-			slog.Error("dns exchange failed", slog.String("server", server.Address), slog.Any("err", lastErr))
-		}
-
-		if lastErr != nil {
-			slog.Error("all dns servers failed", slog.Any("err", lastErr))
-		}
-	}()
+	go d.exchange(msg)
 
 	return len(b), nil
 }
 
+// exchange resolves msg against the configured servers and hands the answer to
+// ReadFrom. It always returns once the connection is closed, so a session that
+// goes away mid-query does not leak this goroutine.
+func (d *dnsConn) exchange(msg *dns.Msg) {
+	var lastErr error
+
+	for _, server := range d.cfg.Servers {
+		var response *dns.Msg
+
+		if server.Address == "local" {
+			localClient := localdns.NewLocalClient(d.interfaceName)
+			response, lastErr = localClient.Exchange(msg)
+			if lastErr != nil {
+				slog.Error("local dns exchange failed", slog.Any("err", lastErr))
+				continue
+			}
+		} else {
+			response, _, lastErr = d.dnsClient.Exchange(msg, server.Address)
+			if lastErr != nil {
+				slog.Error("dns exchange failed", slog.String("server", server.Address), slog.Any("err", lastErr))
+				continue
+			}
+		}
+
+		select {
+		case d.answerCh <- response:
+		case <-d.done:
+		}
+		return
+	}
+
+	if lastErr != nil {
+		slog.Error("all dns servers failed", slog.Any("err", lastErr))
+	}
+}
+
 func (d *dnsConn) Close() error {
+	d.closeOnce.Do(func() {
+		close(d.done)
+	})
 	return nil
 }
 
 func (d *dnsConn) LocalAddr() net.Addr {
-	return nil
+	return &net.UDPAddr{IP: net.IPv4zero, Port: 0}
 }
 
 func (d *dnsConn) SetDeadline(t time.Time) error {
+	d.readDeadline.Set(t)
 	return nil
 }
 
 func (d *dnsConn) SetReadDeadline(t time.Time) error {
+	d.readDeadline.Set(t)
 	return nil
 }
 
-func (d *dnsConn) SetWriteDeadline(t time.Time) error {
+func (d *dnsConn) SetWriteDeadline(time.Time) error {
 	return nil
 }
-
-//
-//type DNS interface {
-//	Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error)
-//}

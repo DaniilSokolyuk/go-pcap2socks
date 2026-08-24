@@ -89,7 +89,7 @@ jobs:
 
       - name: Test
         if: matrix.goarch == 'amd64'  # Only test on native architecture
-        run: go test -v ./...
+        run: go test -race -timeout 600s ./...
 
       - name: Build
         env:

@@ -25,14 +25,26 @@ make build-all
 
 ### Testing
 ```bash
-# Run all tests
+# Everything: unit, component and end-to-end. No root, no pcap driver.
 make test
-# or
-go test -v ./...
+
+# With the race detector (what CI runs)
+make test-race
+
+# End-to-end only
+make test-e2e
+
+# Total statement coverage
+make cover
 
 # Run specific test
 go test -v ./transport -run TestName
 ```
+
+See TESTING.md for the architecture. In short: the only thing tests fake is the
+source of ethernet frames (`device.FrameSource`), so `e2e/` drives the real
+engine over an in-memory segment with a second gVisor stack acting as the
+console.
 
 ### Code Quality
 ```bash
@@ -64,6 +76,10 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 
 ### Core Components
 
+**Engine (engine/)**
+- `engine.go`: `Start(Options) (*Engine, error)` wires config → proxies → device → stack, and `Close()` tears it down. `Options.Source` replaces the live pcap handle, which is how tests run the whole engine in-process.
+- `netconfig.go`: validates the pcap section against the interface it will run on
+
 **Network Stack (core/)**
 - `stack.go`: Creates gVisor TCP/IP stack with IPv4/IPv6, TCP/UDP, ICMP, and ARP protocols
 - `tcp.go`, `udpforwarder.go`: Handle TCP and UDP forwarding through the stack
@@ -72,10 +88,11 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 - The stack operates in promiscuous + spoofing mode to accept all traffic regardless of destination IP
 
 **Device Layer (core/device/)**
-- `pcap.go`: PCAP device implementation using gopacket/pcap for Layer 2 packet capture
+- `source.go`: `FrameSource`, the seam between the device and where frames come from, plus `MemSource` (an in-memory implementation used by tests)
+- `pcapsource.go`: the live pcap handle implementation and the BPF filter
+- `ethernet.go`: the device itself — inbound filtering to the configured network, MAC learning into the stack's neighbor cache, gratuitous ARP on open
 - `device.go`: Device interface abstraction
-- `iobased/endpoint.go`: I/O based endpoint for gVisor integration with MTU enforcement and ICMPSender interface
-- Handles gratuitous ARP, MAC address learning, and BPF filtering
+- `iobased/endpoint.go`: I/O based endpoint for gVisor integration; its `ReadWriter.Read` returns an error to terminate the dispatch loop when the source dies
 - Optional debug packet capture for troubleshooting
 
 **Tunnel (tunnel/)**
@@ -93,7 +110,7 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 - `dns.go`: Local DNS resolver integration
 
 **Configuration (cfg/)**
-- `config.go`: JSON config parsing with support for:
+- `config.go`: JSON config parsing (returns errors; nothing panics) with support for:
   - PCAP settings (interface, IP, MAC, MTU, network)
   - Routing rules (src/dst IP/port based)
   - Multiple outbounds (direct, socks5, reject, dns)
@@ -127,7 +144,7 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 
 - **Adapter Pattern**: `core/adapter/` defines interfaces for TCP/UDP handlers
 - **Strategy Pattern**: Multiple proxy implementations (direct, socks5, reject, dns)
-- **Singleton-like Globals**: `_defaultProxy`, `_defaultDevice`, `_defaultStack` in main.go
+- **Singleton-like Globals**: `proxy._defaultDialer`, `tunnel._tcpQueue` and `core.NicID` are process wide, so only one engine runs at a time and e2e tests are serial
 - **Platform Abstraction**: Separate sockopt files for different OS-specific behavior
 - **Buffer Pooling**: `common/pool/` for efficient memory management
 
@@ -138,6 +155,7 @@ Config supports:
 - Routing rules based on source/destination IP (CIDR) and ports (individual or ranges)
 - Port ranges: "8000-9000"
 - CIDR auto-completion: "192.168.1.1" becomes "192.168.1.1/32"
+- Criteria inside a single rule are combined with **OR**, not AND: any one match selects the outbound
 
 ### Platform-Specific Considerations
 

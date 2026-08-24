@@ -5,31 +5,103 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"runtime"
+	"syscall"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
-	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device"
-	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
-	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
+	"github.com/DaniilSokolyuk/go-pcap2socks/engine"
 	"github.com/jackpal/gateway"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
 //go:embed config.json
 var configData string
 
 func main() {
-	// Setup logging - check SLOG_LEVEL env var
-	logLevel := slog.LevelInfo // Default to debug
+	setupLogging()
+
+	// Check for config command
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		openConfigInEditor()
+		return
+	}
+
+	if err := run(); err != nil {
+		slog.Error("run error", slog.Any("err", err))
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfgFile, err := configPath()
+	if err != nil {
+		return err
+	}
+
+	if !cfg.Exists(cfgFile) {
+		slog.Info("Config file not found, creating a new one", "file", cfgFile)
+		if err = os.WriteFile(cfgFile, []byte(configData), 0o666); err != nil {
+			return fmt.Errorf("write config %s: %w", cfgFile, err)
+		}
+	}
+
+	config, err := cfg.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config %s: %w", cfgFile, err)
+	}
+	slog.Info("Config loaded", "file", cfgFile)
+
+	executeOnStart(config)
+
+	ifce, err := findInterface(config.PCAP.InterfaceGateway)
+	if err != nil {
+		return err
+	}
+	slog.Info("Using ethernet interface", "interface", ifce.Name, "mac", ifce.HardwareAddr.String())
+
+	netConfig, err := engine.ParseNetworkConfig(config.PCAP, ifce)
+	if err != nil {
+		return err
+	}
+	displayNetworkConfig(netConfig)
+
+	eng, err := engine.Start(engine.Options{
+		Config:    config,
+		Interface: ifce,
+		Network:   netConfig,
+	})
+	if err != nil {
+		return err
+	}
+	defer eng.Close()
+
+	go func() {
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("Hello world!"))
+		})
+		if err := http.ListenAndServe(":8085", nil); err != nil {
+			slog.Warn("debug http server stopped", slog.Any("err", err))
+		}
+	}()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+	slog.Info("Shutting down")
+
+	return nil
+}
+
+func setupLogging() {
+	logLevel := slog.LevelInfo
 	if lvl := os.Getenv("SLOG_LEVEL"); lvl != "" {
 		switch lvl {
 		case "debug", "DEBUG":
@@ -43,176 +115,60 @@ func main() {
 		}
 	}
 
-	opts := &slog.HandlerOptions{
-		Level: logLevel,
-	}
-	handler := slog.NewTextHandler(os.Stdout, opts)
-	slog.SetDefault(slog.New(handler))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+}
 
-	// Check for config command
-	if len(os.Args) > 1 && os.Args[1] == "config" {
-		openConfigInEditor()
-		return
-	}
-
-	// get config file from first argument or use config.json
-	var cfgFile string
+// configPath returns the config file from the first argument, or config.json
+// next to the executable.
+func configPath() (string, error) {
 	if len(os.Args) > 1 {
-		cfgFile = os.Args[1]
-	} else {
-		executable, err := os.Executable()
-		if err != nil {
-			slog.Error("get executable error", slog.Any("err", err))
-			return
-		}
-
-		cfgFile = path.Join(path.Dir(executable), "config.json")
+		return os.Args[1], nil
 	}
 
-	cfgExists := cfg.Exists(cfgFile)
-	if !cfgExists {
-		slog.Info("Config file not found, creating a new one", "file", cfgFile)
-		//path to near executable file
-		err := os.WriteFile(cfgFile, []byte(configData), 0666)
-		if err != nil {
-			slog.Error("write config error", slog.Any("file", cfgFile), slog.Any("err", err))
-			return
-		}
-	}
-
-	config, err := cfg.Load(cfgFile)
+	executable, err := os.Executable()
 	if err != nil {
-		slog.Error("load config error", slog.Any("file", cfgFile), slog.Any("err", err))
-		return
-	}
-	slog.Info("Config loaded", "file", cfgFile)
-
-	if len(config.ExecuteOnStart) > 0 {
-		slog.Info("Executing commands on start", "cmd", config.ExecuteOnStart)
-
-		var cmd *exec.Cmd
-		if len(config.ExecuteOnStart) > 1 {
-			cmd = exec.Command(config.ExecuteOnStart[0], config.ExecuteOnStart[1:]...)
-		} else {
-			cmd = exec.Command(config.ExecuteOnStart[0])
-		}
-
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		go func() {
-			err := cmd.Start()
-			if err != nil {
-				slog.Error("execute command error", slog.Any("err", err))
-			}
-
-			err = cmd.Wait()
-			if err != nil {
-
-			}
-		}()
+		return "", fmt.Errorf("get executable: %w", err)
 	}
 
-	err = run(config)
-	if err != nil {
-		slog.Error("run error", slog.Any("err", err))
+	return path.Join(path.Dir(executable), "config.json"), nil
+}
+
+func executeOnStart(config *cfg.Config) {
+	if len(config.ExecuteOnStart) == 0 {
 		return
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("Hello world!"))
-	})
-	log.Fatal(http.ListenAndServe(":8085", nil))
-}
+	slog.Info("Executing commands on start", "cmd", config.ExecuteOnStart)
 
-func run(cfg *cfg.Config) error {
-	// Find the interface first
-	ifce := findInterface(cfg.PCAP.InterfaceGateway)
-	slog.Info("Using ethernet interface", "interface", ifce.Name, "mac", ifce.HardwareAddr.String())
+	cmd := exec.Command(config.ExecuteOnStart[0], config.ExecuteOnStart[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-	// Parse network configuration
-	netConfig, err := parseNetworkConfig(cfg.PCAP, ifce)
-	if err != nil {
-		return err
-	}
-
-	// Display network configuration
-	displayNetworkConfig(netConfig)
-
-	proxies := make(map[string]proxy.Proxy)
-	for _, outbound := range cfg.Outbounds {
-		var p proxy.Proxy
-		switch {
-		case outbound.Direct != nil:
-			p = proxy.NewDirect()
-		case outbound.Socks != nil:
-			p, err = proxy.NewSocks5(outbound.Socks.Address, outbound.Socks.Username, outbound.Socks.Password)
-			if err != nil {
-				return fmt.Errorf("new socks5 error: %w", err)
-			}
-		case outbound.Reject != nil:
-			p = proxy.NewReject()
-		case outbound.DNS != nil:
-			p = proxy.NewDNS(cfg.DNS, ifce.Name)
-		default:
-			return fmt.Errorf("invalid outbound: %+v", outbound)
+	go func() {
+		if err := cmd.Run(); err != nil {
+			slog.Error("execute command error", slog.Any("err", err))
 		}
-
-		proxies[outbound.Tag] = p
-	}
-
-	_defaultProxy = proxy.NewRouter(cfg.Routing.Rules, proxies)
-	proxy.SetDialer(_defaultProxy)
-
-	_defaultDevice, err = device.Open(cfg.Capture, ifce, netConfig, func() device.Stacker {
-		return _defaultStack
-	})
-	if err != nil {
-		return err
-	}
-
-	if _defaultStack, err = core.CreateStack(&core.Config{
-		LinkEndpoint:     _defaultDevice,
-		TransportHandler: &core.Tunnel{},
-		MulticastGroups:  []net.IP{},
-		Options:          []option.Option{},
-	}); err != nil {
-		slog.Error("create stack error", slog.Any("err", err))
-	}
-
-	return nil
+	}()
 }
 
-var (
-	// _defaultProxy holds the default proxy for the engine.
-	_defaultProxy proxy.Proxy
-
-	// _defaultDevice holds the default device for the engine.
-	_defaultDevice device.Device
-
-	// _defaultStack holds the default stack for the engine.
-	_defaultStack *stack.Stack
-)
-
-func findInterface(cfgIfce string) net.Interface {
+func findInterface(cfgIfce string) (net.Interface, error) {
 	var targetIP net.IP
 	if cfgIfce != "" {
 		targetIP = net.ParseIP(cfgIfce)
 		if targetIP == nil {
-			panic(fmt.Errorf("parse ip error: %s", cfgIfce))
+			return net.Interface{}, fmt.Errorf("parse interface gateway ip: %s", cfgIfce)
 		}
 	} else {
 		var err error
 		targetIP, err = gateway.DiscoverInterface()
 		if err != nil {
-			panic(fmt.Errorf("discover interface error: %w", err))
+			return net.Interface{}, fmt.Errorf("discover interface: %w", err)
 		}
 	}
 
-	// Get a list of all interfaces
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		panic(err)
+		return net.Interface{}, fmt.Errorf("list interfaces: %w", err)
 	}
 
 	for _, iface := range ifaces {
@@ -227,65 +183,19 @@ func findInterface(cfgIfce string) net.Interface {
 				continue
 			}
 
-			ip4 := ipnet.IP.To4()
-			if ip4 != nil && bytes.Equal(ip4, targetIP.To4()) {
-				return iface
+			if ip4 := ipnet.IP.To4(); ip4 != nil && bytes.Equal(ip4, targetIP.To4()) {
+				return iface, nil
 			}
 		}
 	}
 
-	panic(fmt.Errorf("interface with IP %s not found", targetIP))
-}
-
-func parseNetworkConfig(pcapCfg cfg.PCAP, ifce net.Interface) (*device.NetworkConfig, error) {
-	// Parse network CIDR
-	_, network, err := net.ParseCIDR(pcapCfg.Network)
-	if err != nil {
-		return nil, fmt.Errorf("parse cidr error: %w", err)
-	}
-
-	// Parse local IP
-	localIP := net.ParseIP(pcapCfg.LocalIP)
-	if localIP == nil {
-		return nil, fmt.Errorf("parse local ip error: %s", pcapCfg.LocalIP)
-	}
-
-	localIP = localIP.To4()
-	if !network.Contains(localIP) {
-		return nil, fmt.Errorf("local ip (%s) not in network (%s)", localIP, network)
-	}
-
-	// Parse or use interface MAC
-	var localMAC net.HardwareAddr
-	if pcapCfg.LocalMAC != "" {
-		localMAC, err = net.ParseMAC(pcapCfg.LocalMAC)
-		if err != nil {
-			return nil, fmt.Errorf("parse local mac error: %w", err)
-		}
-	} else {
-		localMAC = ifce.HardwareAddr
-	}
-
-	// Set MTU
-	mtu := pcapCfg.MTU
-	if mtu == 0 {
-		mtu = uint32(ifce.MTU)
-	}
-
-	return &device.NetworkConfig{
-		Network:  network,
-		LocalIP:  localIP,
-		LocalMAC: localMAC,
-		MTU:      mtu,
-	}, nil
+	return net.Interface{}, fmt.Errorf("interface with IP %s not found", targetIP)
 }
 
 func displayNetworkConfig(config *device.NetworkConfig) {
-	// Calculate IP range
 	ipRangeStart, ipRangeEnd := calculateIPRange(config.Network, config.LocalIP)
 	recommendedMTU := calculateRecommendedMTU(config.MTU)
 
-	// Log network settings in a cleaner format
 	slog.Info("Configure your device with these network settings:")
 	slog.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	slog.Info(fmt.Sprintf("  IP Address:     %s - %s", ipRangeStart.String(), ipRangeEnd.String()))
@@ -328,13 +238,10 @@ func calculateRecommendedMTU(mtu uint32) uint32 {
 	const ethernetHeaderSize = 14
 
 	// Account for common overhead
-	recommendedMTU := mtu - ethernetHeaderSize
-
-	return recommendedMTU
+	return mtu - ethernetHeaderSize
 }
 
 func openConfigInEditor() {
-	// Get config file path
 	executable, err := os.Executable()
 	if err != nil {
 		slog.Error("get executable error", slog.Any("err", err))
@@ -342,17 +249,14 @@ func openConfigInEditor() {
 	}
 	cfgFile := path.Join(path.Dir(executable), "config.json")
 
-	// Create config if it doesn't exist
 	if !cfg.Exists(cfgFile) {
 		slog.Info("Config file not found, creating a new one", "file", cfgFile)
-		err := os.WriteFile(cfgFile, []byte(configData), 0666)
-		if err != nil {
+		if err := os.WriteFile(cfgFile, []byte(configData), 0o666); err != nil {
 			slog.Error("write config error", slog.Any("file", cfgFile), slog.Any("err", err))
 			return
 		}
 	}
 
-	// Determine the editor command based on OS
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -360,15 +264,12 @@ func openConfigInEditor() {
 	case "darwin":
 		cmd = exec.Command("open", "-t", cfgFile)
 	default: // linux and others
-		// Try to use EDITOR env var first
 		editor := os.Getenv("EDITOR")
 		if editor == "" {
 			editor = os.Getenv("VISUAL")
 		}
 		if editor == "" {
-			// Try common editors
-			editors := []string{"nano", "vim", "vi"}
-			for _, e := range editors {
+			for _, e := range []string{"nano", "vim", "vi"} {
 				if _, err := exec.LookPath(e); err == nil {
 					editor = e
 					break
@@ -382,15 +283,12 @@ func openConfigInEditor() {
 		cmd = exec.Command(editor, cfgFile)
 	}
 
-	// Set up the command to use the current terminal
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Run the editor
 	slog.Info("Opening config in editor", "file", cfgFile)
-	err = cmd.Run()
-	if err != nil {
+	if err = cmd.Run(); err != nil {
 		slog.Error("failed to open editor", slog.Any("err", err))
 	}
 }

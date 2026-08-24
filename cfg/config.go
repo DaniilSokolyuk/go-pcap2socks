@@ -31,7 +31,9 @@ func Load(filePath string) (*Config, error) {
 		return nil, err
 	}
 
-	config.Normalize()
+	if err = config.Normalize(); err != nil {
+		return nil, err
+	}
 
 	return config, nil
 }
@@ -55,10 +57,14 @@ type PCAP struct {
 	LocalMAC         string `json:"localMAC"`
 }
 
-func (c *Config) Normalize() {
+func (c *Config) Normalize() error {
 	for i := range c.Routing.Rules {
-		c.Routing.Rules[i].Normalize()
+		if err := c.Routing.Rules[i].Normalize(); err != nil {
+			return fmt.Errorf("routing rule %d: %w", i, err)
+		}
 	}
+
+	return nil
 }
 
 type Rule struct {
@@ -74,12 +80,21 @@ type Rule struct {
 	DstIPs   []net.IPNet
 }
 
-func (r *Rule) Normalize() {
-	r.SrcPorts = mustPorts(r.SrcPort)
-	r.DstPorts = mustPorts(r.DstPort)
+func (r *Rule) Normalize() (err error) {
+	if r.SrcPorts, err = ParsePorts(r.SrcPort); err != nil {
+		return fmt.Errorf("srcPort: %w", err)
+	}
+	if r.DstPorts, err = ParsePorts(r.DstPort); err != nil {
+		return fmt.Errorf("dstPort: %w", err)
+	}
+	if r.SrcIPs, err = ParseCIDRs(r.SrcIP); err != nil {
+		return fmt.Errorf("srcIP: %w", err)
+	}
+	if r.DstIPs, err = ParseCIDRs(r.DstIP); err != nil {
+		return fmt.Errorf("dstIP: %w", err)
+	}
 
-	r.SrcIPs = mustToNetIP(r.SrcIP)
-	r.DstIPs = mustToNetIP(r.DstIP)
+	return nil
 }
 
 type Outbound struct {
@@ -112,55 +127,57 @@ type Capture struct {
 	OutputFile string `json:"outputFile"`
 }
 
-func mustToNetIP(addrs []string) []net.IPNet {
+// ParseCIDRs parses a list of addresses into networks. A plain address without
+// a prefix length is treated as a single host (/32 for IPv4, /128 for IPv6).
+func ParseCIDRs(addrs []string) ([]net.IPNet, error) {
 	ips := make([]net.IPNet, 0, len(addrs))
 
-	if len(addrs) == 0 {
-		return ips
-	}
-
 	for _, addr := range addrs {
-		if !strings.Contains(addr, "/") {
-			addr += "/32"
+		cidr := addr
+		if !strings.Contains(cidr, "/") {
+			if strings.Contains(cidr, ":") {
+				cidr += "/128"
+			} else {
+				cidr += "/32"
+			}
 		}
 
-		_, ipNet, err := net.ParseCIDR(addr)
+		_, ipNet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			panic(fmt.Sprintf("invalid ip: %s", addr))
+			return nil, fmt.Errorf("invalid ip %q: %w", addr, err)
 		}
 
 		ips = append(ips, *ipNet)
 	}
 
-	return ips
+	return ips, nil
 }
 
-func mustPorts(ports string) map[uint16]struct{} {
+// ParsePorts parses a comma separated list of ports and inclusive port ranges,
+// e.g. "53, 80, 8000-9000".
+func ParsePorts(ports string) (map[uint16]struct{}, error) {
 	m := make(map[uint16]struct{})
 
-	if ports == "" {
-		return m
+	if strings.TrimSpace(ports) == "" {
+		return m, nil
 	}
 
 	for _, port := range strings.Split(ports, ",") {
-		if strings.Contains(port, "-") {
-			p := strings.Split(strings.TrimSpace(port), "-")
-			if len(p) != 2 {
-				panic(fmt.Sprintf("invalid port: %s", port))
+		port = strings.TrimSpace(port)
+
+		if lo, hi, isRange := strings.Cut(port, "-"); isRange {
+			mmin, err := strconv.ParseUint(strings.TrimSpace(lo), 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port %q: %w", lo, err)
 			}
 
-			mmin, err := strconv.ParseUint(strings.TrimSpace(p[0]), 10, 16)
+			mmax, err := strconv.ParseUint(strings.TrimSpace(hi), 10, 16)
 			if err != nil {
-				panic(fmt.Sprintf("invalid port: %s", p[0]))
-			}
-
-			mmax, err := strconv.ParseUint(strings.TrimSpace(p[1]), 10, 16)
-			if err != nil {
-				panic(fmt.Sprintf("invalid port: %s", p[1]))
+				return nil, fmt.Errorf("invalid port %q: %w", hi, err)
 			}
 
 			if mmin > mmax {
-				panic(fmt.Sprintf("invalid port: %s", port))
+				return nil, fmt.Errorf("invalid port range %q: start is greater than end", port)
 			}
 
 			for i := mmin; i <= mmax; i++ {
@@ -170,13 +187,13 @@ func mustPorts(ports string) map[uint16]struct{} {
 			continue
 		}
 
-		mustPort, err := strconv.ParseUint(strings.TrimSpace(port), 10, 16)
+		parsed, err := strconv.ParseUint(port, 10, 16)
 		if err != nil {
-			panic(fmt.Sprintf("invalid port: %s", port))
+			return nil, fmt.Errorf("invalid port %q: %w", port, err)
 		}
 
-		m[uint16(mustPort)] = struct{}{}
+		m[uint16(parsed)] = struct{}{}
 	}
 
-	return m
+	return m, nil
 }

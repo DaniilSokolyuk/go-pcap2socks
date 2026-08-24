@@ -1,8 +1,6 @@
 package core
 
 import (
-	"net"
-
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
@@ -25,10 +23,6 @@ type Config struct {
 	// TransportHandler is the handler used by internal
 	// stack to set transport handlers.
 	TransportHandler adapter.TransportHandler
-
-	// MulticastGroups is used by internal stack to add
-	// nic to given groups.
-	MulticastGroups []net.IP
 
 	// Options are supplement options to apply settings
 	// for the internal stack.

@@ -12,9 +12,22 @@ import (
 	"github.com/DaniilSokolyuk/go-pcap2socks/common/pool"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
+	"go.uber.org/atomic"
 )
 
-var UdpSessionTimeout = 5 * time.Minute
+// udpSessionTimeout is read by every live pipe goroutine, so it is atomic:
+// tests shorten it while sessions are in flight.
+var udpSessionTimeout = atomic.NewDuration(5 * time.Minute)
+
+// UDPSessionTimeout returns how long an idle UDP session is kept alive.
+func UDPSessionTimeout() time.Duration {
+	return udpSessionTimeout.Load()
+}
+
+// SetUDPSessionTimeout sets the idle timeout for UDP sessions.
+func SetUDPSessionTimeout(d time.Duration) {
+	udpSessionTimeout.Store(d)
+}
 
 func HandleUDPConn(uc adapter.UDPConn) {
 	metadata := uc.MD()
@@ -46,7 +59,7 @@ func pipeChannel(from net.PacketConn, to net.PacketConn, wg *sync.WaitGroup) {
 	defer pool.Put(buf)
 
 	for {
-		from.SetReadDeadline(time.Now().Add(UdpSessionTimeout))
+		from.SetReadDeadline(time.Now().Add(UDPSessionTimeout()))
 		n, dest, err := from.ReadFrom(buf)
 		if err != nil {
 			if errors.Is(err, io.ErrClosedPipe) {
@@ -60,7 +73,7 @@ func pipeChannel(from net.PacketConn, to net.PacketConn, wg *sync.WaitGroup) {
 			return
 		}
 
-		to.SetWriteDeadline(time.Now().Add(UdpSessionTimeout))
+		to.SetWriteDeadline(time.Now().Add(UDPSessionTimeout()))
 		if _, err := to.WriteTo(buf[:n], dest); err != nil {
 			slog.Warn("[UDP] write error", "source", from.LocalAddr(), "dest", dest, "error", err)
 			return

@@ -7,6 +7,7 @@ const (
 	ModeSocks5
 	ModeRouter
 	ModeReject
+	ModeDNS
 )
 
 type Mode uint8
@@ -21,6 +22,8 @@ func (mode Mode) String() string {
 		return "socks5"
 	case ModeReject:
 		return "reject"
+	case ModeDNS:
+		return "dns"
 	default:
 		return fmt.Sprintf("proto(%d)", mode)
 	}

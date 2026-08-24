@@ -114,7 +114,7 @@ func (ph proxyHandler) MD() *metadata.Metadata {
 
 func withUDPNatHandler(handle func(adapter.UDPConn)) option.Option {
 	return func(s *stack.Stack) error {
-		udpForwarder := NewUDPForwarder(context.Background(), s, CreateProxyHandler(handle), tunnel.UdpSessionTimeout)
+		udpForwarder := NewUDPForwarder(context.Background(), s, CreateProxyHandler(handle), tunnel.UDPSessionTimeout())
 		s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 		return nil
 	}
