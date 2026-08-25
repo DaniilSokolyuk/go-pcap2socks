@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"sync/atomic"
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/option"
 	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
+	"github.com/DaniilSokolyuk/go-pcap2socks/tunnel"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
@@ -39,11 +40,14 @@ type Options struct {
 	StackOptions []option.Option
 }
 
-// Engine is a running instance.
+// Engine is a running instance. Nothing about it is process wide, so several
+// can run side by side.
 type Engine struct {
 	Stack  *stack.Stack
+	NicID  tcpip.NICID
 	Device device.Device
 	Proxy  proxy.Proxy
+	Tunnel *tunnel.Tunnel
 }
 
 // Done is closed when the device stops reading frames. Callers that want to
@@ -70,41 +74,42 @@ func Start(opts Options) (*Engine, error) {
 		return nil, err
 	}
 
-	e := &Engine{Proxy: router}
-	proxy.SetDialer(router)
-
-	// The device starts dispatching as soon as CreateStack attaches the NIC,
-	// which is before the stack is assigned, so it is published separately and
-	// atomically. The device treats a nil Stacker as "not ready yet".
-	var built atomic.Pointer[stack.Stack]
-	stacker := func() device.Stacker {
-		s := built.Load()
-		if s == nil {
-			return nil
-		}
-		return s
+	e := &Engine{
+		Proxy:  router,
+		Tunnel: tunnel.New(router),
 	}
 
 	if opts.Source != nil {
-		e.Device, err = device.OpenWithSource(opts.Config.Capture, opts.Source, "mem", opts.Network, stacker)
+		e.Device, err = device.OpenWithSource(opts.Config.Capture, opts.Source, "mem", opts.Network)
 	} else {
-		e.Device, err = device.Open(opts.Config.Capture, opts.Interface, opts.Network, stacker)
+		e.Device, err = device.Open(opts.Config.Capture, opts.Interface, opts.Network)
 	}
 	if err != nil {
+		e.Tunnel.Close()
 		return nil, fmt.Errorf("open device: %w", err)
 	}
 
-	s, err := core.CreateStack(&core.Config{
-		LinkEndpoint:     e.Device,
-		TransportHandler: &core.Tunnel{},
+	s, nicID, err := core.NewStack(&core.Config{
+		TransportHandler: e.Tunnel,
 		Options:          opts.StackOptions,
 	})
 	if err != nil {
 		e.Device.Close()
+		e.Tunnel.Close()
 		return nil, fmt.Errorf("create stack: %w", err)
 	}
-	built.Store(s)
 	e.Stack = s
+	e.NicID = nicID
+
+	// The device has to know where to record neighbors before AttachNIC, which
+	// is what starts the dispatch loop: after that, frames can arrive at any
+	// moment.
+	e.Device.AttachNeighborCache(s, nicID)
+
+	if err := core.AttachNIC(s, nicID, e.Device); err != nil {
+		_ = e.Close()
+		return nil, fmt.Errorf("attach nic: %w", err)
+	}
 
 	return e, nil
 }
@@ -117,6 +122,9 @@ func (e *Engine) Close() error {
 	if e.Stack != nil {
 		e.Stack.Close()
 		e.Stack.Wait()
+	}
+	if e.Tunnel != nil {
+		e.Tunnel.Close()
 	}
 	return nil
 }

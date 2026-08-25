@@ -11,7 +11,6 @@ import (
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/common/pool"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
-	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
 	"go.uber.org/atomic"
 )
 
@@ -29,10 +28,10 @@ func SetUDPSessionTimeout(d time.Duration) {
 	udpSessionTimeout.Store(d)
 }
 
-func HandleUDPConn(uc adapter.UDPConn) {
+func (t *Tunnel) handleUDPConn(uc adapter.UDPConn) {
 	metadata := uc.MD()
 
-	pc, err := proxy.DialUDP(metadata)
+	pc, err := t.dialer.DialUDP(metadata)
 	if err != nil {
 		// Closing is not optional: the NAT entry stays healthy until this
 		// connection is closed, and every further packet from the same source

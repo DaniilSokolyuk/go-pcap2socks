@@ -112,9 +112,9 @@ func (ph proxyHandler) MD() *metadata.Metadata {
 	}
 }
 
-func withUDPNatHandler(handle func(adapter.UDPConn)) option.Option {
+func withUDPNatHandler(nicID tcpip.NICID, handle func(adapter.UDPConn)) option.Option {
 	return func(s *stack.Stack) error {
-		udpForwarder := NewUDPForwarder(context.Background(), s, CreateProxyHandler(handle), tunnel.UDPSessionTimeout())
+		udpForwarder := NewUDPForwarder(context.Background(), s, nicID, CreateProxyHandler(handle), tunnel.UDPSessionTimeout())
 		s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 		return nil
 	}
@@ -123,13 +123,15 @@ func withUDPNatHandler(handle func(adapter.UDPConn)) option.Option {
 type UDPForwarder struct {
 	ctx    context.Context
 	stack  *stack.Stack
+	nicID  tcpip.NICID
 	udpNat *udpnat.Service
 }
 
-func NewUDPForwarder(ctx context.Context, stack *stack.Stack, handler N.UDPConnectionHandlerEx, udpTimeout time.Duration) *UDPForwarder {
+func NewUDPForwarder(ctx context.Context, stack *stack.Stack, nicID tcpip.NICID, handler N.UDPConnectionHandlerEx, udpTimeout time.Duration) *UDPForwarder {
 	f := &UDPForwarder{
 		ctx:   ctx,
 		stack: stack,
+		nicID: nicID,
 	}
 	f.udpNat = udpnat.New(handler, f.prepare, udpTimeout, true)
 	return f
@@ -142,6 +144,7 @@ func (f *UDPForwarder) prepare(source M.Socksaddr, _ M.Socksaddr, _ any) (bool, 
 	}
 	writer := &UDPBackWriter{
 		stack:         f.stack,
+		nicID:         f.nicID,
 		source:        AddressFromAddr(source.Addr),
 		sourcePort:    source.Port,
 		sourceNetwork: proto,
@@ -165,6 +168,7 @@ func (f *UDPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pac
 type UDPBackWriter struct {
 	access        sync.Mutex
 	stack         *stack.Stack
+	nicID         tcpip.NICID
 	source        tcpip.Address
 	sourcePort    uint16
 	sourceNetwork tcpip.NetworkProtocolNumber
@@ -182,7 +186,7 @@ func (w *UDPBackWriter) WritePacket(packetBuffer *buf.Buffer, destination M.Sock
 	defer packetBuffer.Release()
 
 	route, err := w.stack.FindRoute(
-		NicID,
+		w.nicID,
 		AddressFromAddr(destination.Addr),
 		w.source,
 		w.sourceNetwork,

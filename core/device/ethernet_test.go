@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
 var (
@@ -21,38 +20,38 @@ var (
 	testClientMAC  = net.HardwareAddr{0x02, 0, 0, 0, 0, 0x05}
 )
 
-// fakeStacker records the neighbors the device installs.
-type fakeStacker struct {
+// testNicID is the NIC the fake stacker is told about.
+const testNicID tcpip.NICID = 1
+
+// fakeNeighborCache records the neighbors the device installs.
+type fakeNeighborCache struct {
 	neighbors map[string]tcpip.LinkAddress
 }
 
-func (f *fakeStacker) AddStaticNeighbor(_ tcpip.NICID, _ tcpip.NetworkProtocolNumber, addr tcpip.Address, linkAddr tcpip.LinkAddress) tcpip.Error {
+func (f *fakeNeighborCache) AddStaticNeighbor(_ tcpip.NICID, _ tcpip.NetworkProtocolNumber, addr tcpip.Address, linkAddr tcpip.LinkAddress) tcpip.Error {
 	f.neighbors[net.IP(addr.AsSlice()).String()] = linkAddr
-	return nil
-}
-
-func (f *fakeStacker) AddProtocolAddress(tcpip.NICID, tcpip.ProtocolAddress, stack.AddressProperties) tcpip.Error {
 	return nil
 }
 
 // newTestDevice returns a device on an in-memory segment plus its source and
 // the stacker that records neighbor updates.
-func newTestDevice(t *testing.T) (*ethDevice, *MemSource, *fakeStacker) {
+func newTestDevice(t *testing.T) (*ethDevice, *MemSource, *fakeNeighborCache) {
 	t.Helper()
 
 	_, network, err := net.ParseCIDR("172.26.0.0/16")
 	require.NoError(t, err)
 
 	src := NewMemSource(16)
-	stacker := &fakeStacker{neighbors: map[string]tcpip.LinkAddress{}}
+	stacker := &fakeNeighborCache{neighbors: map[string]tcpip.LinkAddress{}}
 
 	dev, err := OpenWithSource(cfg.Capture{}, src, "mem", &NetworkConfig{
 		Network:  network,
 		LocalIP:  testGatewayIP,
 		LocalMAC: testGatewayMAC,
 		MTU:      1500,
-	}, func() Stacker { return stacker })
+	})
 	require.NoError(t, err)
+	dev.AttachNeighborCache(stacker, testNicID)
 	t.Cleanup(dev.Close)
 
 	// Drop the gratuitous announcement emitted on open.
@@ -178,12 +177,13 @@ func TestDeviceSendsGratuitousARPOnOpen(t *testing.T) {
 	require.NoError(t, err)
 
 	src := NewMemSource(16)
-	stacker := &fakeStacker{neighbors: map[string]tcpip.LinkAddress{}}
+	stacker := &fakeNeighborCache{neighbors: map[string]tcpip.LinkAddress{}}
 
 	dev, err := OpenWithSource(cfg.Capture{}, src, "mem", &NetworkConfig{
 		Network: network, LocalIP: testGatewayIP, LocalMAC: testGatewayMAC, MTU: 1500,
-	}, func() Stacker { return stacker })
+	})
 	require.NoError(t, err)
+	dev.AttachNeighborCache(stacker, testNicID)
 	defer dev.Close()
 
 	frame := <-src.Outbound()
@@ -260,21 +260,20 @@ func TestDeviceDropsARPWithNonIPv4Addresses(t *testing.T) {
 // attaching the NIC and the engine publishing the stack: the device must skip
 // the neighbor entry rather than call into a nil stack, and must still learn
 // the address on a later frame.
+//
+// The engine can no longer reach that state - it calls AttachStack before the
+// stack creates its NIC, and creating the NIC is what starts the dispatch loop
+// - but OpenWithSource is usable on its own, so the guard stays and this pins
+// it.
 func TestDeviceLearnsNothingBeforeTheStackExists(t *testing.T) {
 	_, network, err := net.ParseCIDR("172.26.0.0/16")
 	require.NoError(t, err)
 
 	src := NewMemSource(16)
-	stacker := &fakeStacker{neighbors: map[string]tcpip.LinkAddress{}}
+	stacker := &fakeNeighborCache{neighbors: map[string]tcpip.LinkAddress{}}
 
-	var ready bool
 	dev, err := OpenWithSource(cfg.Capture{}, src, "mem", &NetworkConfig{
 		Network: network, LocalIP: testGatewayIP, LocalMAC: testGatewayMAC, MTU: 1500,
-	}, func() Stacker {
-		if !ready {
-			return nil
-		}
-		return stacker
 	})
 	require.NoError(t, err)
 	t.Cleanup(dev.Close)
@@ -288,7 +287,7 @@ func TestDeviceLearnsNothingBeforeTheStackExists(t *testing.T) {
 	assert.Equal(t, frame, got, "the frame is still forwarded")
 	assert.Empty(t, stacker.neighbors)
 
-	ready = true
+	dev.AttachNeighborCache(stacker, testNicID)
 
 	src.Inject(frame)
 	_, err = dev.(*ethDevice).Read()

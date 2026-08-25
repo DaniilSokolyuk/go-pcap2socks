@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -141,7 +140,7 @@ func TestMACLearning(t *testing.T) {
 	h.Source.Inject(arpRequest(t, clientMAC, clientIP, net.ParseIP(DefaultGatewayIP)))
 
 	require.Eventually(t, func() bool {
-		neighbors, err := h.Engine.Stack.Neighbors(core.NicID, header.IPv4ProtocolNumber)
+		neighbors, err := h.Engine.Stack.Neighbors(h.Engine.NicID, header.IPv4ProtocolNumber)
 		if err != nil {
 			return false
 		}

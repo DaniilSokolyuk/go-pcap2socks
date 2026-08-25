@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/miekg/dns"
@@ -125,6 +126,31 @@ type SOCKS5Server struct {
 	closers []io.Closer
 	user    string
 	pass    string
+
+	// accepted counts connections the server has taken. It is the only signal
+	// a test has that the engine actually reached the proxy, as opposed to
+	// still being on its way there.
+	accepted atomic.Int64
+}
+
+// Accepted returns how many connections the server has accepted so far.
+func (s *SOCKS5Server) Accepted() int {
+	return int(s.accepted.Load())
+}
+
+// SetAuth changes the credentials the server demands; an empty user disables
+// authentication. Tests use it to turn a failing dial into a succeeding one
+// without rebinding the listener.
+func (s *SOCKS5Server) SetAuth(user, pass string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.user, s.pass = user, pass
+}
+
+func (s *SOCKS5Server) auth() (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.user, s.pass
 }
 
 // StartSOCKS5 starts the server on loopback. Empty user disables auth.
@@ -155,6 +181,7 @@ func StartSOCKS5At(t testing.TB, addr, user, pass string) *SOCKS5Server {
 			if err != nil {
 				return
 			}
+			s.accepted.Add(1)
 			s.track(conn)
 			s.wg.Add(1)
 			go func() {
@@ -258,7 +285,8 @@ func (s *SOCKS5Server) handshake(conn net.Conn) error {
 		return err
 	}
 
-	if s.user == "" {
+	wantUser, wantPass := s.auth()
+	if wantUser == "" {
 		_, err := conn.Write([]byte{0x05, 0x00})
 		return err
 	}
@@ -285,7 +313,7 @@ func (s *SOCKS5Server) handshake(conn net.Conn) error {
 		return err
 	}
 
-	if string(user) != s.user || string(pass) != s.pass {
+	if string(user) != wantUser || string(pass) != wantPass {
 		_, _ = conn.Write([]byte{0x01, 0x01})
 		return errors.New("bad credentials")
 	}

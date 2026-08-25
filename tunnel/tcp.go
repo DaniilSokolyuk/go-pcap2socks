@@ -1,25 +1,28 @@
 package tunnel
 
 import (
-	"github.com/DaniilSokolyuk/go-pcap2socks/common/pool"
-	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
-	"gvisor.dev/gvisor/pkg/log"
+	"context"
 	"io"
 	"log/slog"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/DaniilSokolyuk/go-pcap2socks/common/pool"
+	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
 	M "github.com/DaniilSokolyuk/go-pcap2socks/md"
-	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
+	"gvisor.dev/gvisor/pkg/log"
 )
 
 const (
 	// tcpWaitTimeout implements a TCP half-close timeout.
 	tcpWaitTimeout = 60 * time.Second
+
+	// tcpConnectTimeout bounds dialling the outbound.
+	tcpConnectTimeout = 5 * time.Second
 )
 
-func handleTCPConn(originConn adapter.TCPConn) {
+func (t *Tunnel) handleTCPConn(originConn adapter.TCPConn) {
 	defer originConn.Close()
 
 	id := originConn.ID()
@@ -31,7 +34,10 @@ func handleTCPConn(originConn adapter.TCPConn) {
 		DstPort: id.LocalPort,
 	}
 
-	remoteConn, err := proxy.Dial(metadata)
+	ctx, cancel := context.WithTimeout(context.Background(), tcpConnectTimeout)
+	defer cancel()
+
+	remoteConn, err := t.dialer.DialContext(ctx, metadata)
 	if err != nil {
 		slog.Warn("[TCP] Dial error", "dest", metadata.DestinationAddress(), "error", err)
 		return

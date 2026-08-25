@@ -9,7 +9,6 @@ import (
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/arpr"
 	"github.com/DaniilSokolyuk/go-pcap2socks/cfg"
-	"github.com/DaniilSokolyuk/go-pcap2socks/core"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/device/iobased"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -36,7 +35,12 @@ type ethDevice struct {
 	ipMacTable map[string]net.HardwareAddr
 	mtu        uint32 // Configured MTU (may differ from Interface.MTU)
 	rMux       sync.Mutex
-	stacker    func() Stacker
+
+	// neighbors and nicID are set by AttachNeighborCache before the NIC is
+	// created, and the NIC is what starts the dispatch loop. Nothing reads them
+	// before that happens, so they need no synchronisation.
+	neighbors NeighborCache
+	nicID     tcpip.NICID
 }
 
 var _ Device = (*ethDevice)(nil)
@@ -44,7 +48,7 @@ var _ Device = (*ethDevice)(nil)
 const offset = 0
 
 // Open captures on the given interface with a live pcap handle.
-func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, stacker func() Stacker) (_ Device, err error) {
+func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("open pcap: %v", r)
@@ -56,7 +60,7 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, 
 		return nil, err
 	}
 
-	dev, err := OpenWithSource(captureCfg, src, "pcap", netConfig, stacker)
+	dev, err := OpenWithSource(captureCfg, src, "pcap", netConfig)
 	if err != nil {
 		_ = src.Close()
 		return nil, err
@@ -68,11 +72,10 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig, 
 // OpenWithSource builds a device on top of an arbitrary frame source. It is the
 // shared body of Open and the entry point used by tests, which pass a
 // MemSource instead of a pcap handle.
-func OpenWithSource(captureCfg cfg.Capture, src FrameSource, typ string, netConfig *NetworkConfig, stacker func() Stacker) (Device, error) {
+func OpenWithSource(captureCfg cfg.Capture, src FrameSource, typ string, netConfig *NetworkConfig) (Device, error) {
 	t := &ethDevice{
 		name:       "dspcap",
 		typ:        typ,
-		stacker:    stacker,
 		network:    netConfig.Network,
 		localIP:    netConfig.LocalIP,
 		localMAC:   netConfig.LocalMAC,
@@ -212,26 +215,30 @@ func (t *ethDevice) Done() <-chan struct{} {
 	return t.ep.Done()
 }
 
+// AttachNeighborCache tells the device where to record the addresses it learns.
+// It must be called before the stack creates its NIC, because that is what
+// starts the dispatch loop.
+func (t *ethDevice) AttachNeighborCache(nc NeighborCache, nicID tcpip.NICID) {
+	t.neighbors = nc
+	t.nicID = nicID
+}
+
 func (t *ethDevice) SetHardwareAddr(srcIP net.IP, srcMAC net.HardwareAddr) {
 	if _, ok := t.ipMacTable[string(srcIP)]; ok {
 		return
 	}
-
-	// The stack only exists once the engine has finished building it, and the
-	// dispatch loop starts one step earlier. Frames arriving in that window are
-	// still forwarded; we just record nothing so the next one retries.
-	s := t.stacker()
-	if s == nil {
+	if t.neighbors == nil {
 		return
 	}
 
 	slog.Info(fmt.Sprintf("Device %s (%s) joined the network", srcIP, srcMAC))
 	t.ipMacTable[string(srcIP)] = srcMAC
 	// after restart app some devices doesnt react to GratuitousArp, so we need to add them manually
-	s.AddStaticNeighbor(core.NicID, header.IPv4ProtocolNumber, tcpip.AddrFrom4Slice(srcIP), tcpip.LinkAddress(srcMAC))
+	t.neighbors.AddStaticNeighbor(t.nicID, header.IPv4ProtocolNumber, tcpip.AddrFrom4Slice(srcIP), tcpip.LinkAddress(srcMAC))
 }
 
-type Stacker interface {
+// NeighborCache is all the device needs from the stack: somewhere to record the
+// MAC address it just learned for an IP. *stack.Stack satisfies it.
+type NeighborCache interface {
 	AddStaticNeighbor(nicID tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address, linkAddr tcpip.LinkAddress) tcpip.Error
-	AddProtocolAddress(id tcpip.NICID, protocolAddress tcpip.ProtocolAddress, properties stack.AddressProperties) tcpip.Error
 }

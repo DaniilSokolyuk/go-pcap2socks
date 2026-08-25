@@ -178,27 +178,39 @@ func TestUDPReject(t *testing.T) {
 func TestUDPRecoversAfterProxyDialFailure(t *testing.T) {
 	echo := EchoUDP(t)
 
-	// Reserve an address, then give it up: the proxy is unreachable at first
-	// and comes back on the very same address later.
-	proxyAddr := reserveAddr(t)
+	// The proxy is reachable but turns the engine away, so the dial fails at
+	// the SOCKS5 handshake.
+	//
+	// Pointing the engine at an address nothing listens on would model a dead
+	// proxy more literally, but nothing observable then says the dial was even
+	// attempted, and the test has to guess how long to wait for it. That guess
+	// is a coin flip: the console-to-engine path costs about a millisecond
+	// normally and anywhere from 300ms to a second under the race detector. A
+	// server that answers can be counted instead, which is what Accepted is
+	// for, and the dial fails just as thoroughly either way.
+	socks := StartSOCKS5(t, "user", "pass")
+	socks.Upstream = echo
 
-	h := Start(t, NewConfig().Socks("", proxyAddr, "", "").Build(t))
+	// No credentials on this side: every dial is refused until SetAuth below.
+	h := Start(t, NewConfig().Socks("", socks.Addr, "", "").Build(t))
 
 	conn, err := h.Client.DialUDP()
 	require.NoError(t, err)
 	defer conn.Close()
 
-	// This one cannot go anywhere: nothing is listening on proxyAddr yet.
 	_, err = conn.WriteTo([]byte("lost"), udpAddr(t, fakeUDPDst))
 	require.NoError(t, err)
+
+	// The recovery only means anything once a dial has actually failed, so wait
+	// for the engine to have reached the proxy rather than assuming it did.
+	waitForAccepted(t, socks, 1)
 
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
 	buf := make([]byte, 1500)
 	_, _, err = conn.ReadFrom(buf)
-	require.Error(t, err, "there is no proxy to answer yet")
+	require.Error(t, err, "the proxy refused the engine, so nothing can answer")
 
-	socks := StartSOCKS5At(t, proxyAddr.String(), "", "")
-	socks.Upstream = echo
+	socks.SetAuth("", "")
 
 	// Same socket, same source port: the session must be retried, not served
 	// from the stale NAT entry.
@@ -208,18 +220,19 @@ func TestUDPRecoversAfterProxyDialFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	n, _, err := conn.ReadFrom(buf)
-	require.NoError(t, err, "the source port must recover once the proxy is back")
+	require.NoError(t, err, "the source port must recover once the proxy accepts")
 	assert.Equal(t, want, buf[:n])
 }
 
-// reserveAddr returns a loopback address that nothing is listening on.
-func reserveAddr(t *testing.T) netip.AddrPort {
+// waitForAccepted blocks until the proxy has accepted at least n connections.
+func waitForAccepted(t *testing.T, socks *SOCKS5Server, n int) {
 	t.Helper()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	addr := mustAddrPort(t, ln.Addr())
-	require.NoError(t, ln.Close())
-
-	return addr
+	deadline := time.Now().Add(10 * time.Second)
+	for socks.Accepted() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("proxy accepted %d connections, want %d", socks.Accepted(), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
