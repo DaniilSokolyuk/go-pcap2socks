@@ -110,9 +110,9 @@ jobs:
           esac
           
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            7z a "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${{ matrix.target }}" README.md LICENSE install.md config.md
+            7z a "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${{ matrix.target }}" README.md LICENSE
           else
-            tar czf "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${{ matrix.target }}" README.md LICENSE install.md config.md
+            tar czf "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${{ matrix.target }}" README.md LICENSE
           fi
 
       - name: Upload artifacts
