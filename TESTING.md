@@ -113,9 +113,8 @@ destination survives the whole path intact.
 
 ## Constraints to keep in mind
 
-- The tunnel queue (`tunnel._tcpQueue`) and the default proxy dialer
-  (`proxy._defaultDialer`) are process wide, so e2e tests must not call
-  `t.Parallel`.
+- The UDP session idle timeout (`tunnel.SetUDPSessionTimeout`) is process wide
+  and tests mutate it, so e2e tests must not call `t.Parallel`.
 - `e2e.TestMain` shortens the UDP idle timeout to 2s so sessions left behind by
   a test do not keep goroutines alive for minutes. Use
   `tunnel.SetUDPSessionTimeout` rather than assigning a package variable: it is

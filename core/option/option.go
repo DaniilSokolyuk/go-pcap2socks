@@ -134,15 +134,8 @@ func WithDefault() Option {
 			// https://tools.ietf.org/html/rfc2018
 			WithTCPSACKEnabled(tcpSACKEnabled),
 
-			// TCPRACKLossDetection: indicates RACK is used for loss detection and
-			// recovery.
-			//
-			// TCPRACKStaticReoWnd: indicates the reordering window should not be
-			// adjusted when DSACK is received.
-			//
-			// TCPRACKNoDupTh: indicates RACK should not consider the classic three
-			// duplicate acknowledgements rule to mark the segments as lost. This
-			// is used when reordering is not detected.
+			// Loss recovery. Zero keeps RACK off - see the tcpRecovery const
+			// for why.
 			WithTCPRecovery(tcpRecovery),
 		}
 

@@ -261,10 +261,10 @@ func TestDeviceDropsARPWithNonIPv4Addresses(t *testing.T) {
 // the neighbor entry rather than call into a nil stack, and must still learn
 // the address on a later frame.
 //
-// The engine can no longer reach that state - it calls AttachStack before the
-// stack creates its NIC, and creating the NIC is what starts the dispatch loop
-// - but OpenWithSource is usable on its own, so the guard stays and this pins
-// it.
+// The engine can no longer reach that state - it calls AttachNeighborCache
+// before the stack creates its NIC, and creating the NIC is what starts the
+// dispatch loop - but OpenWithSource is usable on its own, so the guard stays
+// and this pins it.
 func TestDeviceLearnsNothingBeforeTheStackExists(t *testing.T) {
 	_, network, err := net.ParseCIDR("172.26.0.0/16")
 	require.NoError(t, err)

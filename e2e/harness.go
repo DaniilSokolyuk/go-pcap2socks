@@ -56,8 +56,8 @@ type Harness struct {
 // Start brings up an engine with the given config, wires a fake console to it
 // and registers cleanup with t.
 //
-// The engine uses process wide singletons (the tunnel queue and the default
-// proxy dialer), so harnesses must not run in parallel.
+// Tests mutate the process wide UDP session timeout
+// (tunnel.SetUDPSessionTimeout), so harnesses must not run in parallel.
 func Start(t testing.TB, config *cfg.Config) *Harness {
 	t.Helper()
 
@@ -104,7 +104,7 @@ func StartWith(t testing.TB, config *cfg.Config, opts HarnessOptions) *Harness {
 	h.done = make(chan struct{})
 	go h.wire(ctx)
 
-	// t.Cleanup is LIFO, so this runs before the h.Stop that StartRaw
+	// t.Cleanup is LIFO, so this runs before the h.Stop that startRawWith
 	// registered. The wire pump has to be stopped before the client stack goes
 	// away, otherwise it can inject a frame into a closed stack.
 	t.Cleanup(func() {

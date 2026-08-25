@@ -32,10 +32,10 @@ type tuning struct {
 	recovery   tcpip.TCPRecovery
 }
 
-// The engine ships reno with RACK off (core/option/option.go). Both were
-// inherited from Tailscale, which disabled RACK for gvisor#9778 and pinned
-// reno for gvisor#11632. Both bugs are fixed in the gVisor this module
-// pins, so the four combinations are worth measuring rather than assuming.
+// The engine ships cubic with RACK off (core/option/option.go). Tailscale
+// disabled RACK for gvisor#9778 and pinned reno for gvisor#11632; both bugs
+// are fixed in the gVisor this module pins, which is why cubic came back and
+// why the four combinations are worth measuring rather than assuming.
 var tunings = []tuning{
 	{"reno+norack", "reno", tcpip.TCPRecovery(0)},
 	{"reno+rack", "reno", tcpip.TCPRACKLossDetection},
@@ -51,9 +51,10 @@ type linkProfile struct {
 	link Link
 }
 
-// Loss stops at 1%: the emulator drops in both directions, so 2% already puts
-// a 2MiB transfer past 40s and the run stops being something anyone will wait
-// for. Consoles on a struggling access point sit in the 0.1-1% band anyway.
+// Loss stops at 1%: the emulator drops in both directions, so at 2% a
+// benchPayload transfer already takes long enough that the run stops being
+// something anyone will wait for. Consoles on a struggling access point sit
+// in the 0.1-1% band anyway.
 // Only lossy profiles discriminate. On a clean wire, and on a delayed but
 // lossless one, a transfer this size never leaves slow start, so all four
 // tunings return the same number and the profile measures ramp-up rather than

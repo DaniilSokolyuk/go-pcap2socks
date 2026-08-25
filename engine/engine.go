@@ -40,8 +40,9 @@ type Options struct {
 	StackOptions []option.Option
 }
 
-// Engine is a running instance. Nothing about it is process wide, so several
-// can run side by side.
+// Engine is a running instance. Nothing about it is process wide - the only
+// remaining process wide knob is tunnel.SetUDPSessionTimeout - so several can
+// run side by side.
 type Engine struct {
 	Stack  *stack.Stack
 	NicID  tcpip.NICID
@@ -58,9 +59,6 @@ func (e *Engine) Done() <-chan struct{} {
 }
 
 // Start builds the proxies, the device and the stack, and starts forwarding.
-//
-// Note that the tunnel and the default proxy dialer are process wide, so only
-// one engine can usefully run at a time.
 func Start(opts Options) (*Engine, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("config is required")

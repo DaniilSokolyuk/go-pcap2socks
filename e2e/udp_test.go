@@ -172,7 +172,7 @@ func TestUDPReject(t *testing.T) {
 }
 
 // TestUDPRecoversAfterProxyDialFailure pins the fix for a dial failure leaving
-// the source port blackholed: HandleUDPConn used to return without closing the
+// the source port blackholed: the UDP handler used to return without closing the
 // connection, so the NAT entry stayed healthy and every later packet from the
 // same port just refreshed its lifetime instead of retrying the proxy.
 func TestUDPRecoversAfterProxyDialFailure(t *testing.T) {

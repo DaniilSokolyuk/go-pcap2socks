@@ -26,6 +26,9 @@ func Load(filePath string) (*Config, error) {
 
 	config := &Config{}
 	decoder := json.NewDecoder(file)
+	// A typo in a field name silently disables the field otherwise, which for a
+	// hand-written config is much harder to notice than a startup error.
+	decoder.DisallowUnknownFields()
 	err = decoder.Decode(config)
 	if err != nil {
 		return nil, err

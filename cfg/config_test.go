@@ -144,6 +144,17 @@ func TestLoad(t *testing.T) {
 		assert.Contains(t, err.Error(), "dstPort")
 	})
 
+	t.Run("rejects unknown fields", func(t *testing.T) {
+		path := write(t, `{
+			"pcap": {"network": "172.26.0.0/16", "localIP": "172.26.0.1"},
+			"outbunds": [{"tag": "", "direct": {}}]
+		}`)
+
+		_, err := Load(path)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "outbunds")
+	})
+
 	t.Run("missing file", func(t *testing.T) {
 		_, err := Load(filepath.Join(t.TempDir(), "nope.json"))
 		require.Error(t, err)

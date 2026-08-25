@@ -134,8 +134,8 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 2. **MAC Learning**: Source IP/MAC pairs are learned and added to neighbor cache
 3. **Stack Processing**: gVisor stack processes IP packets and dispatches to protocol handlers
 4. **Connection Handling**:
-   - TCP: Queued to `_tcpQueue`, handled by `handleTCPConn`
-   - UDP: Handled by `HandleUDPConn` with bidirectional packet relay and idle timeout
+   - TCP: Queued to the tunnel's TCP queue, handled by `handleTCPConn`
+   - UDP: Handled by `Tunnel.HandleUDP` with bidirectional packet relay and idle timeout
 5. **Routing**: Router matches rules based on src/dst IP/port and selects outbound
 6. **Proxy**: Selected proxy (direct/socks5/reject/dns) establishes connection
 7. **Bidirectional Copy**: Data is copied between client and remote connections
@@ -144,7 +144,7 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 
 - **Adapter Pattern**: `core/adapter/` defines interfaces for TCP/UDP handlers
 - **Strategy Pattern**: Multiple proxy implementations (direct, socks5, reject, dns)
-- **Singleton-like Globals**: `proxy._defaultDialer`, `tunnel._tcpQueue` and `core.NicID` are process wide, so only one engine runs at a time and e2e tests are serial
+- **Instance-based Engine**: nothing about a running `engine.Engine` is process wide, so several can run side by side. The one process-wide knob is the UDP session idle timeout (`tunnel.SetUDPSessionTimeout`); e2e tests mutate it, so they stay serial
 - **Platform Abstraction**: Separate sockopt files for different OS-specific behavior
 - **Buffer Pooling**: `common/pool/` for efficient memory management
 

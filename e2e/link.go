@@ -48,8 +48,9 @@ type Link struct {
 
 const defaultQueueDepth = 128
 
-// active reports whether the link does anything at all. The zero value is the
-// plain segment functional tests run on, delivered inline.
+// active reports whether the link needs a queue and a pump goroutine. Loss
+// alone does not: it is applied inline on send. The zero value is the plain
+// segment functional tests run on, delivered inline.
 func (l Link) active() bool { return l.Delay > 0 || l.Rate > 0 }
 
 func (l Link) queueDepth() int {

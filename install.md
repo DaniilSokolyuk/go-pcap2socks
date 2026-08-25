@@ -4,7 +4,7 @@ go-pcap2socks depends on libpcap and is fully compatible with any version on any
 
 ## Prerequisites
 
-- Go 1.21 or later ([download](https://go.dev/dl/))
+- Go 1.26 or later ([download](https://go.dev/dl/))
 - libpcap (see platform-specific instructions below)
 
 ## Installing from Source

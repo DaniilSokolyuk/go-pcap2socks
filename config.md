@@ -29,19 +29,18 @@ go-pcap2socks /path/to/custom-config.json
 
 ## executeOnStart
 
-Commands to execute when the application starts. Useful for starting local VPN connections for example.
+A single command to execute when the application starts. Useful for starting a local VPN connection for example.
 
 ```json
 "executeOnStart": [
-  "echo 'Starting pcap2socks and VPN'",
-  "sing-box run -c /etc/sing-box/config.json"
+  "sing-box", "run", "-c", "/etc/sing-box/config.json"
 ]
 ```
 
 - Type: Array of strings
 - Optional: Yes
 - Default: Empty array
-- Each string is executed as a shell command in order
+- The first element is the executable, the remaining elements are its arguments. The command is executed directly (no shell), runs in the background, and a failure is logged but does not stop go-pcap2socks
 
 ## pcap
 
@@ -49,7 +48,7 @@ Controls the packet capture interface and virtual network configuration.
 
 ```json
 "pcap": {
-  "interfaceGateway": "en0",
+  "interfaceGateway": "192.168.1.10",
   "mtu": 1500,
   "network": "172.26.0.0/16",
   "localIP": "172.26.0.1",
@@ -60,14 +59,15 @@ Controls the packet capture interface and virtual network configuration.
 ### Fields:
 
 - **interfaceGateway**
-  - Type: String
+  - Type: String (IPv4 address)
   - Optional: Yes
-  - Description: Physical network interface to use as gateway
+  - Default: auto-discovered (the interface holding the default route)
+  - Description: IPv4 address of the physical network interface to capture on. Note this is an IP address assigned to the interface, not an interface name like "en0"
 
 - **mtu**
   - Type: Number
-  - Required: Yes
-  - Default: 1500
+  - Optional: Yes
+  - Default: the capture interface's MTU
   - Description: Maximum Transmission Unit size for packets
 
 - **network**
@@ -85,7 +85,8 @@ Controls the packet capture interface and virtual network configuration.
 - **localMAC**
   - Type: String
   - Optional: Yes
-  - Format: "aa:bb:cc:dd:ee:ff"
+  - Default: the capture interface's MAC address
+  - Format: "aa:bb:cc:dd:ee:ff" (must be a 6 byte ethernet address)
   - Description: MAC address for the virtual interface
 
 ## dns
@@ -99,10 +100,10 @@ Configures DNS servers for domain name resolution.
       "address": "local"
     },
     {
-      "address": "8.8.8.8"
+      "address": "8.8.8.8:53"
     },
     {
-      "address": "1.1.1.1"
+      "address": "1.1.1.1:53"
     }
   ]
 }
@@ -112,26 +113,26 @@ Configures DNS servers for domain name resolution.
 
 - **servers**
   - Type: Array of objects
-  - Required: Yes
-  - Description: List of DNS servers to use
+  - Optional: Yes
+  - Description: List of DNS servers to try in order (first successful answer wins)
 
 - **servers[].address**
   - Type: String
   - Required: Yes
-  - Values: "local" or IP address
+  - Values: "local" or "host:port" (e.g. "8.8.8.8:53" - the port is not optional)
   - Description: DNS server address. "local" uses system DNS
 
 ## routing
 
 Defines rules for routing traffic to different outbounds based on matching criteria.
 
+**Criteria inside a single rule are combined with OR, not AND**: the rule matches as soon as any one of its criteria matches. To require several conditions at once, they cannot be expressed in one rule. A rule with no criteria never matches anything (there is no catch-all rule; unmatched traffic goes to the default outbound).
+
 ```json
 "routing": {
   "rules": [
     {
-      "srcPort": "1024-65535",
       "dstPort": "80,443",
-      "srcIP": ["192.168.1.0/24"],
       "dstIP": ["10.0.0.0/8", "172.16.0.0/12"],
       "outboundTag": "proxy"
     }
@@ -139,12 +140,14 @@ Defines rules for routing traffic to different outbounds based on matching crite
 }
 ```
 
+This example sends traffic to the "proxy" outbound if the destination port is 80 or 443, **or** the destination IP is in one of the listed networks.
+
 ### Fields:
 
 - **rules**
   - Type: Array of rule objects
-  - Required: Yes
-  - Description: Ordered list of routing rules (first match wins)
+  - Optional: Yes
+  - Description: Ordered list of routing rules (first match wins). Every referenced outboundTag must exist, otherwise startup fails
 
 ### Rule Object Fields:
 
@@ -184,13 +187,13 @@ Defines rules for routing traffic to different outbounds based on matching crite
 - Combined: `"80,443,1000-2000,3000"`
 
 ### IP Format Examples:
-- Single IP: `["192.168.1.1"]` (automatically treated as /32)
+- Single IP: `["192.168.1.1"]` (automatically treated as /32; a bare IPv6 address becomes /128)
 - CIDR: `["192.168.0.0/24"]`
 - Multiple: `["192.168.0.0/24", "10.0.0.0/8", "172.16.0.0/12"]`
 
 ## outbounds
 
-Defines handlers for outgoing traffic. Each outbound has a tag for routing reference. **An outbound with an empty tag (`""`) serves as the default route for all unmatched traffic.**
+Defines handlers for outgoing traffic. Each outbound has a tag for routing reference. **Exactly one outbound must have an empty tag (`""`); it is the default route for all unmatched traffic, and startup fails without it.** Duplicate tags are also a startup error.
 
 ```json
 "outbounds": [
@@ -221,8 +224,8 @@ Defines handlers for outgoing traffic. Each outbound has a tag for routing refer
 
 - **tag**
   - Type: String
-  - Required: Yes
-  - Description: Identifier for routing. **Empty string (`""`) denotes default outbound**
+  - Optional: Yes (omitted or empty means this is the default outbound)
+  - Description: Identifier for routing. **Empty string (`""`) denotes the default outbound; exactly one outbound must have it**
 
 ### Outbound Types:
 
@@ -237,7 +240,7 @@ Routes traffic directly to the internet without proxy.
 ```
 
 #### SOCKS
-Routes traffic through a SOCKS4/SOCKS5 proxy.
+Routes traffic through a SOCKS5 proxy.
 
 ```json
 {
@@ -250,7 +253,7 @@ Routes traffic through a SOCKS4/SOCKS5 proxy.
 }
 ```
 
-- **address**: Required. Proxy server address and port
+- **address**: Required. Proxy server address and port. An address starting with `/` is treated as a Unix domain socket path
 - **username**: Optional. For SOCKS5 authentication
 - **password**: Optional. For SOCKS5 authentication
 
@@ -289,7 +292,7 @@ Debug feature for capturing packets to a file for analysis. Captures all Etherne
 
 - **enabled**
   - Type: Boolean
-  - Required: Yes
+  - Optional: Yes
   - Default: false
   - Description: Enable/disable packet capture
 
@@ -297,7 +300,7 @@ Debug feature for capturing packets to a file for analysis. Captures all Etherne
   - Type: String
   - Optional: Yes
   - Default: "capture_YYYYMMDD_HHMMSS.pcap"
-  - Description: Path to save captured packets. Timestamp is automatically appended to prevent overwriting
+  - Description: Path to save captured packets. A timestamp is automatically inserted before the extension to prevent overwriting, so "debug-session.pcap" is written as "debug-session_YYYYMMDD_HHMMSS.pcap"
 
 ## Complete Example Configurations
 
@@ -350,7 +353,7 @@ Debug feature for capturing packets to a file for analysis. Captures all Etherne
   "dns": {
     "servers": [
       {
-        "address": "8.8.8.8"
+        "address": "8.8.8.8:53"
       }
     ]
   },
@@ -382,10 +385,10 @@ Debug feature for capturing packets to a file for analysis. Captures all Etherne
 ```json
 {
   "executeOnStart": [
-    "ip route add 172.26.0.0/16 dev utun0"
+    "ip", "route", "add", "172.26.0.0/16", "dev", "utun0"
   ],
   "pcap": {
-    "interfaceGateway": "en0",
+    "interfaceGateway": "192.168.1.10",
     "mtu": 1500,
     "network": "172.26.0.0/16",
     "localIP": "172.26.0.1"
