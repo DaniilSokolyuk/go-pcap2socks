@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -161,6 +162,96 @@ func drain(h *Harness) {
 		case <-time.After(50 * time.Millisecond):
 			return
 		}
+	}
+}
+
+// strayTCPSegment builds a TCP ACK from the client to an address outside the
+// network, for a connection that does not exist. Delivering it makes the stack
+// reply with a RST, and building that reply takes the stack lock (FindRoute).
+func strayTCPSegment(t *testing.T) []byte {
+	t.Helper()
+
+	eth := &layers.Ethernet{
+		SrcMAC:       clientMAC,
+		DstMAC:       gatewayMAC,
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip := &layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolTCP,
+		SrcIP:    net.ParseIP(DefaultClientIP),
+		DstIP:    net.ParseIP("203.0.113.10"),
+	}
+	tcp := &layers.TCP{
+		SrcPort: 40000,
+		DstPort: 9,
+		Seq:     1,
+		Ack:     1,
+		ACK:     true,
+		Window:  65535,
+	}
+	require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
+
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
+	require.NoError(t, gopacket.SerializeLayers(buf, opts, eth, ip, tcp))
+
+	return buf.Bytes()
+}
+
+// TestCloseWithInflightFrameDoesNotDeadlock pins a shutdown deadlock:
+// Stack.Wait waits for the link endpoint while holding the stack lock, and a
+// frame still being delivered can need that same lock to answer a stray
+// segment with a RST. Engine.Close must therefore wait for the dispatch loop
+// to exit before closing the stack. The injector keeps the dispatch loop busy
+// delivering exactly such frames while the engine shuts down.
+func TestCloseWithInflightFrameDoesNotDeadlock(t *testing.T) {
+	frame := strayTCPSegment(t)
+
+	for i := 0; i < 20; i++ {
+		h := StartRaw(t, NewConfig().Reject("").Build(t))
+
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					h.Source.Inject(frame)
+				}
+			}
+		}()
+		// Drain the RST replies so the outbound queue never stalls the stack.
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-h.Source.Outbound():
+				}
+			}
+		}()
+
+		stopped := make(chan struct{})
+		go func() {
+			h.Stop()
+			close(stopped)
+		}()
+
+		select {
+		case <-stopped:
+		case <-time.After(10 * time.Second):
+			t.Fatal("engine Close deadlocked with a frame delivery in flight")
+		}
+
+		close(stop)
+		wg.Wait()
 	}
 }
 

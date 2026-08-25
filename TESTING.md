@@ -106,6 +106,12 @@ destination survives the whole path intact.
   engine publishing it.
 - `e2e.TestEngineDoneWhenSourceDies` - the dispatch loop swallowed the read
   error, leaving a process that looked healthy but routed nothing.
+- `e2e.TestCloseWithInflightFrameDoesNotDeadlock` - Engine.Close closed the
+  stack while a frame delivery was still in flight. Stack.Wait holds the stack
+  lock while waiting for the link endpoint, and answering a stray segment with
+  a RST needs that same lock (FindRoute), so shutdown deadlocked - this is what
+  intermittently hung the routing tests in CI for 10 minutes. Verified to hang
+  without the fix.
 - `e2e.TestUDPSessionIsSharedAcrossDestinations` - the UDP NAT keys sessions on
   the source address only; this pins the behaviour across sing upgrades.
 - `proxy.TestRouterSelectsOutbound/criteria_are_ORed,_not_ANDed` - documents

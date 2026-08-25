@@ -116,6 +116,13 @@ func Start(opts Options) (*Engine, error) {
 func (e *Engine) Close() error {
 	if e.Device != nil {
 		e.Device.Close()
+		// Wait for the dispatch loop to finish delivering any in-flight frame
+		// and exit before touching the stack. Stack.Wait waits for this
+		// endpoint while holding the stack lock, and delivering a frame can
+		// need that same lock - a late segment for a connection that no longer
+		// exists answers with a RST via Stack.FindRoute - so closing the stack
+		// with a delivery still in flight deadlocks shutdown.
+		e.Device.Wait()
 	}
 	if e.Stack != nil {
 		e.Stack.Close()
