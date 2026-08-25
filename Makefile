@@ -98,13 +98,13 @@ lint:
 package: clean build-all
 	@echo "Creating release packages..."
 	# Linux AMD64
-	tar czf $(BINARY_NAME)_$(VERSION)_linux_amd64.tar.gz $(BINARY_NAME)-linux-amd64 README.md LICENSE install.md config.md
+	tar czf $(BINARY_NAME)_$(VERSION)_linux_amd64.tar.gz $(BINARY_NAME)-linux-amd64 README.md LICENSE
 	# Linux ARM64
-	tar czf $(BINARY_NAME)_$(VERSION)_linux_arm64.tar.gz $(BINARY_NAME)-linux-arm64 README.md LICENSE install.md config.md
+	tar czf $(BINARY_NAME)_$(VERSION)_linux_arm64.tar.gz $(BINARY_NAME)-linux-arm64 README.md LICENSE
 	# Darwin ARM64
-	tar czf $(BINARY_NAME)_$(VERSION)_darwin_arm64.tar.gz $(BINARY_NAME)-darwin-arm64 README.md LICENSE install.md config.md
+	tar czf $(BINARY_NAME)_$(VERSION)_darwin_arm64.tar.gz $(BINARY_NAME)-darwin-arm64 README.md LICENSE
 	# Windows AMD64
-	zip $(BINARY_NAME)_$(VERSION)_windows_amd64.zip $(BINARY_NAME)-windows-amd64.exe README.md LICENSE install.md config.md
+	zip $(BINARY_NAME)_$(VERSION)_windows_amd64.zip $(BINARY_NAME)-windows-amd64.exe README.md LICENSE
 
 .PHONY: help
 help:
