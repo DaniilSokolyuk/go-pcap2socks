@@ -11,129 +11,37 @@ import (
 
 	"github.com/DaniilSokolyuk/go-pcap2socks/common/pool"
 	"github.com/DaniilSokolyuk/go-pcap2socks/core/adapter"
-	"github.com/DaniilSokolyuk/go-pcap2socks/proxy"
-	alog "github.com/anacrolix/log"
-	"github.com/anacrolix/upnp"
+	"go.uber.org/atomic"
 )
 
-var UdpSessionTimeout = 5 * time.Minute
+// udpSessionTimeout is read by every live pipe goroutine, so it is atomic:
+// tests shorten it while sessions are in flight.
+var udpSessionTimeout = atomic.NewDuration(5 * time.Minute)
 
-type UDPMapping struct {
-	device       upnp.Device
-	proto        upnp.Protocol
-	internalPort int
-	externalPort int
+// UDPSessionTimeout returns how long an idle UDP session is kept alive.
+func UDPSessionTimeout() time.Duration {
+	return udpSessionTimeout.Load()
 }
 
-type UDPSession struct {
-	conn     net.PacketConn
-	mappings []*UDPMapping
-	mutex    sync.Mutex
+// SetUDPSessionTimeout sets the idle timeout for UDP sessions.
+func SetUDPSessionTimeout(d time.Duration) {
+	udpSessionTimeout.Store(d)
 }
 
-var excludedPorts = map[int]bool{
-	53:   true, // DNS
-	123:  true, // NTP
-	137:  true, // NetBIOS Name Service
-	138:  true, // NetBIOS Datagram Service
-	161:  true, // SNMP
-	162:  true, // SNMP Trap
-	1900: true, // SSDP (UPnP discovery)
-}
-
-func shouldForwardPort(port int) bool {
-	// Don't forward system ports (0-1023) and excluded ports
-	if port <= 1023 || excludedPorts[port] {
-		return false
-	}
-	return true
-}
-
-func (s *UDPSession) addMapping(mapping *UDPMapping) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	s.mappings = append(s.mappings, mapping)
-}
-
-func (s *UDPSession) cleanup() {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	for _, mapping := range s.mappings {
-		err := mapping.device.DeletePortMapping(mapping.proto, mapping.externalPort)
-		if err != nil {
-			slog.Warn("Failed to remove UPnP port mapping",
-				"device", mapping.device.GetLocalIPAddress(),
-				"internalPort", mapping.internalPort,
-				"externalPort", mapping.externalPort,
-				"error", err)
-		} else {
-			slog.Info("Successfully removed UPnP port mapping",
-				"device", mapping.device.GetLocalIPAddress(),
-				"internalPort", mapping.internalPort,
-				"externalPort", mapping.externalPort)
-		}
-	}
-	s.mappings = nil
-}
-
-func addPortMapping(session *UDPSession, d upnp.Device, proto upnp.Protocol, internalPort int) {
-	logger := slog.With(
-		"device", d.GetLocalIPAddress(),
-		"proto", proto,
-		"internalPort", internalPort,
-	)
-
-	externalPort, err := d.AddPortMapping(proto, internalPort, internalPort, "go-pcap2socks", 0)
-	if err != nil {
-		logger.Warn("Failed to add UPnP port mapping", "error", err)
-		return
-	}
-
-	mapping := &UDPMapping{
-		device:       d,
-		proto:        proto,
-		internalPort: internalPort,
-		externalPort: externalPort,
-	}
-	session.addMapping(mapping)
-
-	logger.Info("Successfully added UPnP port mapping", "externalPort", externalPort)
-}
-
-func setupUPnP(session *UDPSession, port int) {
-	if !shouldForwardPort(port) {
-		slog.Debug("Skipping UPnP setup for excluded port", "port", port)
-		return
-	}
-
-	devices := upnp.Discover(0, 2*time.Second, alog.NewLogger("upnp"))
-	slog.Info("Discovered UPnP devices", "count", len(devices))
-
-	for _, d := range devices {
-		go addPortMapping(session, d, upnp.UDP, port)
-	}
-}
-
-func HandleUDPConn(uc adapter.UDPConn) {
+func (t *Tunnel) handleUDPConn(uc adapter.UDPConn) {
 	metadata := uc.MD()
 
-	session := &UDPSession{}
-
-	// Setup UPnP port mapping for the source port
-	_, srcPort := parseAddr(metadata.Addr())
-	setupUPnP(session, int(srcPort))
-
-	pc, err := proxy.DialUDP(metadata)
+	pc, err := t.dialer.DialUDP(metadata)
 	if err != nil {
+		// Closing is not optional: the NAT entry stays healthy until this
+		// connection is closed, and every further packet from the same source
+		// refreshes its lifetime. Leaving it behind blackholes the client's
+		// source port for as long as it keeps sending.
+		uc.Close()
 		slog.Warn("[UDP] dial error: ", "error", err)
-		session.cleanup()
 		return
 	}
-	defer func() {
-		pc.Close()
-		session.cleanup()
-	}()
+	defer pc.Close()
 
 	slog.Info("[UDP] Connection", "source", metadata.SourceAddress(), "dest", metadata.DestinationAddress())
 
@@ -155,7 +63,7 @@ func pipeChannel(from net.PacketConn, to net.PacketConn, wg *sync.WaitGroup) {
 	defer pool.Put(buf)
 
 	for {
-		from.SetReadDeadline(time.Now().Add(UdpSessionTimeout))
+		from.SetReadDeadline(time.Now().Add(UDPSessionTimeout()))
 		n, dest, err := from.ReadFrom(buf)
 		if err != nil {
 			if errors.Is(err, io.ErrClosedPipe) {
@@ -169,7 +77,7 @@ func pipeChannel(from net.PacketConn, to net.PacketConn, wg *sync.WaitGroup) {
 			return
 		}
 
-		to.SetWriteDeadline(time.Now().Add(UdpSessionTimeout))
+		to.SetWriteDeadline(time.Now().Add(UDPSessionTimeout()))
 		if _, err := to.WriteTo(buf[:n], dest); err != nil {
 			slog.Warn("[UDP] write error", "source", from.LocalAddr(), "dest", dest, "error", err)
 			return

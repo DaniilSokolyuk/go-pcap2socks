@@ -89,7 +89,7 @@ jobs:
 
       - name: Test
         if: matrix.goarch == 'amd64'  # Only test on native architecture
-        run: go test -v ./...
+        run: go test -race -timeout 600s ./...
 
       - name: Build
         env:
@@ -110,13 +110,13 @@ jobs:
           esac
           
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            7z a "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${{ matrix.target }}" README.md LICENSE install.md config.md
+            7z a "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${{ matrix.target }}" README.md LICENSE
           else
-            tar czf "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${{ matrix.target }}" README.md LICENSE install.md config.md
+            tar czf "go-pcap2socks_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${{ matrix.target }}" README.md LICENSE
           fi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: go-pcap2socks-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
@@ -131,14 +131,14 @@ jobs:
     
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: go-pcap2socks-*
           merge-multiple: true
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: artifacts/*
           draft: false

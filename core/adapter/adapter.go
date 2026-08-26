@@ -15,7 +15,7 @@ type TCPConn interface {
 	ID() *stack.TransportEndpointID
 }
 
-// UDPConn implements net.Conn and net.PacketConn.
+// UDPConn implements the net.PacketConn interface.
 type UDPConn interface {
 	net.PacketConn
 

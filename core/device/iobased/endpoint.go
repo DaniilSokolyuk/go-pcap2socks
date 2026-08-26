@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 
@@ -38,6 +39,10 @@ type Endpoint struct {
 
 	// wg keeps track of running goroutines.
 	wg sync.WaitGroup
+
+	// done is closed when the dispatch loop stops, which happens when the
+	// underlying source can no longer be read from.
+	done chan struct{}
 }
 
 // New returns stack.LinkEndpoint(.*Endpoint) and error.
@@ -63,6 +68,7 @@ func New(rw ReadWriter, mtu uint32, offset int, mac net.HardwareAddr) (*Endpoint
 		Endpoint: channel.New(defaultOutQueueLen, mtu, linkAddr),
 		rw:       rw,
 		mtu:      mtu,
+		done:     make(chan struct{}),
 	}, nil
 }
 
@@ -88,16 +94,35 @@ func (e *Endpoint) Wait() {
 	e.wg.Wait()
 }
 
+// Done is closed once the dispatch loop has stopped: the frame source is gone
+// and no further inbound traffic will ever be seen.
+func (e *Endpoint) Done() <-chan struct{} {
+	return e.done
+}
+
 // dispatchLoop dispatches packets to upper layer.
 func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 	// Call cancel() to ensure (*Endpoint).outboundLoop(context.Context) exits
 	// gracefully after (*Endpoint).dispatchLoop(context.CancelFunc) returns.
 	defer cancel()
+	defer close(e.done)
 
 	for {
-		data := e.rw.Read()
+		data, err := e.rw.Read()
+		if err != nil {
+			// The source is gone; nothing left to dispatch. Anything other than
+			// an orderly close means we lost the capture, which leaves the
+			// process running as a silent no-op router unless it is reported.
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
+				slog.Debug("device closed, dispatch loop stopped")
+			} else {
+				slog.Error("device read failed, dispatch loop stopped", slog.Any("err", err))
+			}
+			return
+		}
+
 		if len(data) == 0 {
-			continue
+			continue /* filtered out by the device */
 		}
 
 		if !e.IsAttached() {
@@ -141,5 +166,9 @@ func (e *Endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
 
 type ReadWriter interface {
 	io.Writer
-	Read() []byte
+
+	// Read returns the next inbound frame. A nil frame with a nil error means
+	// the frame was dropped and reading should continue; a non-nil error
+	// terminates the dispatch loop.
+	Read() ([]byte, error)
 }
