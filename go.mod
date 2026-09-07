@@ -6,7 +6,7 @@ require (
 	github.com/gopacket/gopacket v1.5.0
 	github.com/jackpal/gateway v1.2.0
 	github.com/miekg/dns v1.1.72
-	github.com/sagernet/sing v0.9.0-beta.4
+	github.com/sagernet/sing v0.9.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sys v0.47.0
