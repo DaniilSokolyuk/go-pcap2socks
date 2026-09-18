@@ -3,7 +3,7 @@ module github.com/DaniilSokolyuk/go-pcap2socks
 go 1.26.3
 
 require (
-	github.com/gopacket/gopacket v1.5.0
+	github.com/gopacket/gopacket v1.7.2
 	github.com/jackpal/gateway v1.2.0
 	github.com/miekg/dns v1.1.72
 	github.com/sagernet/sing v0.9.0-beta.4
@@ -21,7 +21,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/exp v0.0.0-20251002181428-27f1f14c8bb9 // indirect
 	golang.org/x/mod v0.34.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
