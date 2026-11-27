@@ -207,6 +207,9 @@ func displayNetworkConfig(config *device.NetworkConfig) {
 	slog.Info(fmt.Sprintf("  IP Address:     %s - %s", ipRangeStart.String(), ipRangeEnd.String()))
 	slog.Info(fmt.Sprintf("  Subnet Mask:    %s", net.IP(config.Network.Mask).String()))
 	slog.Info(fmt.Sprintf("  Gateway:        %s", config.LocalIP.String()))
+	// There is no DHCP here, so the device has no DNS server unless it is told
+	// one, and nothing opens by name without it.
+	slog.Info("  DNS:            1.1.1.1, 8.8.8.8")
 	slog.Info(fmt.Sprintf("  MTU:            %d (or lower)", recommendedMTU))
 	slog.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }

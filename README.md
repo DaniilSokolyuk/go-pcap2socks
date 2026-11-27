@@ -117,7 +117,7 @@ The whole config is validated at startup: unknown field names (typos), invalid v
 
 ### How it works
 
-go-pcap2socks announces itself on your LAN as the gateway of the virtual network configured in `pcap`. On start it prints the settings to enter on the device: the usable IP range, subnet mask, gateway address and MTU. Give the device a static IP from that range with the printed gateway, and its internet-bound traffic arrives at go-pcap2socks, where every TCP connection and UDP session is matched against the routing rules and forwarded through the selected outbound.
+go-pcap2socks announces itself on your LAN as the gateway of the virtual network configured in `pcap`. On start it prints the settings to enter on the device: the usable IP range, subnet mask, gateway address, DNS servers and MTU. Give the device a static IP from that range with the printed gateway and DNS (go-pcap2socks does not hand out addresses, so without a DNS server set by hand nothing opens by name), and its internet-bound traffic arrives at go-pcap2socks, where every TCP connection and UDP session is matched against the routing rules and forwarded through the selected outbound.
 
 ### CLI Commands
 
