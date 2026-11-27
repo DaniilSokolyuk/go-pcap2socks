@@ -90,6 +90,7 @@ Windows and Linux builds use `CGO_ENABLED=0`: Windows loads Npcap's DLL at run t
 **Device Layer (core/device/)**
 - `source.go`: `FrameSource`, the seam between the device and where frames come from, plus `MemSource` (an in-memory implementation used by tests)
 - `pcapsource.go`: the live pcap handle implementation, every platform but Linux
+- `pcapsender_windows.go`: batched transmit on Windows through Npcap's send queue (`pcap_sendqueue_transmit`); macOS and the BSDs have no call that sends several frames, see `pcapsender_other.go`
 - `afpacket_linux.go`, `framesender_linux.go`: the Linux implementation — gopacket's `afpacket` ring for capture and a packet socket with `sendmmsg` for batched transmit
 - `bpf.go`: the capture filter, as text for libpcap (`BPFFilter`) and as a BPF program for Linux (`CaptureFilter`); keep the two in step
 - `ethernet.go`: the device itself — inbound filtering to the configured network, MAC learning into the stack's neighbor cache, gratuitous ARP on open

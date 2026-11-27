@@ -15,9 +15,15 @@ import (
 // live pcap handle. Linux talks to the kernel itself, see afpacket_linux.go.
 type pcapSource struct {
 	handle *pcap.Handle
+	// tx sends a batch in one call where the platform can; nil where it
+	// cannot, and then frames go out one at a time.
+	tx frameSender
 }
 
-var _ FrameSource = (*pcapSource)(nil)
+var (
+	_ FrameSource = (*pcapSource)(nil)
+	_ BatchWriter = (*pcapSource)(nil)
+)
 
 func newPcapSource(ifce net.Interface, netConfig *NetworkConfig) (*pcapSource, error) {
 	dev, err := findPcapDevice(ifce)
@@ -56,7 +62,27 @@ func newPcapSource(ifce net.Interface, netConfig *NetworkConfig) (*pcapSource, e
 		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}
 
-	return &pcapSource{handle: handle}, nil
+	src := &pcapSource{handle: handle}
+	if tx, err := newPcapFrameSender(handle); err != nil {
+		slog.Warn("batched sending is unavailable, sending one frame at a time", "reason", err)
+	} else {
+		src.tx = tx
+	}
+	return src, nil
+}
+
+// WriteFrames sends a batch of frames, in one call where the platform has a
+// way to do that.
+func (p *pcapSource) WriteFrames(frames [][]byte) error {
+	if p.tx != nil {
+		return p.tx.send(frames)
+	}
+	for _, frame := range frames {
+		if err := p.handle.WritePacketData(frame); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *pcapSource) ReadFrame() ([]byte, error) {
@@ -73,6 +99,9 @@ func (p *pcapSource) WriteFrame(frame []byte) error {
 }
 
 func (p *pcapSource) Close() error {
+	if p.tx != nil {
+		_ = p.tx.close()
+	}
 	p.handle.Close()
 	return nil
 }
