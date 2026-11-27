@@ -196,6 +196,21 @@ func (t *ethDevice) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+// WriteFrames sends a batch of frames, in one call when the source supports
+// it.
+func (t *ethDevice) WriteFrames(frames [][]byte) error {
+	if bw, ok := t.src.(BatchWriter); ok {
+		if err := bw.WriteFrames(frames); err != nil {
+			slog.Error("write packets error", slog.Any("err", err))
+		}
+		return nil
+	}
+	for _, frame := range frames {
+		_, _ = t.Write(frame)
+	}
+	return nil
+}
+
 func (t *ethDevice) Name() string {
 	return t.name
 }

@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -22,6 +24,14 @@ const (
 	// Queue length for outbound packet, arriving for read. Overflow
 	// causes packet drops.
 	defaultOutQueueLen = 1 << 10
+
+	// maxWriteBatch bounds how many outbound packets are handed to a
+	// BatchWriter at once.
+	maxWriteBatch = 64
+
+	// slowWriteLogThreshold keeps the "slowest write" log quiet while the
+	// record is still being set by ordinary, fast writes.
+	slowWriteLogThreshold = time.Millisecond
 )
 
 // Endpoint implements the interface of stack.LinkEndpoint from io.ReadWriter.
@@ -43,6 +53,47 @@ type Endpoint struct {
 	// done is closed when the dispatch loop stops, which happens when the
 	// underlying source can no longer be read from.
 	done chan struct{}
+
+	// dropped counts outbound packets discarded because the queue was full.
+	dropped atomic.Uint64
+	// slowestWrite is the longest a single write to the source has taken.
+	slowestWrite atomic.Int64
+}
+
+// TxStats describes how sending has gone since the endpoint was created.
+type TxStats struct {
+	// Dropped is how many outbound packets were discarded because the source
+	// could not keep up with the stack.
+	Dropped uint64
+	// SlowestWrite is the longest a single write of a batch has taken.
+	SlowestWrite time.Duration
+}
+
+// TxStats returns the transmit counters.
+func (e *Endpoint) TxStats() TxStats {
+	return TxStats{
+		Dropped:      e.dropped.Load(),
+		SlowestWrite: time.Duration(e.slowestWrite.Load()),
+	}
+}
+
+// WritePackets queues packets for the outbound loop. The stack never waits
+// for the source: sending happens on a goroutine of its own.
+//
+// When the source cannot keep up and the queue is full, the oldest queued
+// packets make way for the new ones. For a game the packet that has waited
+// longest is the one worth least, and for TCP losing the head of the queue
+// is noticed a queue length sooner than losing the tail.
+func (e *Endpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error) {
+	for excess := e.NumQueued() + pkts.Len() - defaultOutQueueLen; excess > 0; excess-- {
+		oldest := e.Endpoint.Read()
+		if oldest == nil {
+			break
+		}
+		oldest.DecRef()
+		e.dropped.Add(1)
+	}
+	return e.Endpoint.WritePackets(pkts)
 }
 
 // New returns stack.LinkEndpoint(.*Endpoint) and error.
@@ -142,12 +193,66 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 // outboundLoop reads outbound packets from channel, and then it calls
 // writePacket to send those packets back to lower layer.
 func (e *Endpoint) outboundLoop(ctx context.Context) {
+	bw, batching := e.rw.(BatchWriter)
+	if !batching {
+		for {
+			pkt := e.ReadContext(ctx)
+			if pkt == nil {
+				break
+			}
+			e.writePacket(pkt)
+		}
+		return
+	}
+
+	views := make([]*buffer.View, 0, maxWriteBatch)
+	frames := make([][]byte, 0, maxWriteBatch)
+	var (
+		reportedDrops uint64
+		lastReport    time.Time
+	)
 	for {
 		pkt := e.ReadContext(ctx)
 		if pkt == nil {
 			break
 		}
-		e.writePacket(pkt)
+		// Take whatever else is already queued, without waiting for more:
+		// an idle link still sends every packet immediately, a busy one
+		// sends them a batch at a time.
+		for pkt != nil {
+			view := pkt.ToView()
+			pkt.DecRef()
+			views = append(views, view)
+			frames = append(frames, view.AsSlice())
+			if len(frames) == maxWriteBatch {
+				break
+			}
+			pkt = e.Read()
+		}
+
+		start := time.Now()
+		_ = bw.WriteFrames(frames)
+		took := time.Since(start)
+
+		// A write that takes longer than any before it is the first sign of a
+		// source that is struggling, well before anything is dropped.
+		if int64(took) > e.slowestWrite.Load() {
+			e.slowestWrite.Store(int64(took))
+			if took >= slowWriteLogThreshold {
+				slog.Debug("slowest write to the device so far", "took", took, "frames", len(frames))
+			}
+		}
+		if dropped := e.dropped.Load(); dropped != reportedDrops && start.Sub(lastReport) >= time.Second {
+			slog.Warn("device cannot keep up, dropped the oldest queued packets",
+				"dropped", dropped-reportedDrops, "total", dropped)
+			reportedDrops, lastReport = dropped, start
+		}
+
+		for i, view := range views {
+			view.Release()
+			views[i], frames[i] = nil, nil
+		}
+		views, frames = views[:0], frames[:0]
 	}
 }
 
@@ -162,6 +267,12 @@ func (e *Endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
 		return &tcpip.ErrInvalidEndpointState{}
 	}
 	return nil
+}
+
+// BatchWriter is an optional extension of ReadWriter. When the device
+// implements it, the outbound loop sends queued packets in batches.
+type BatchWriter interface {
+	WriteFrames(frames [][]byte) error
 }
 
 type ReadWriter interface {

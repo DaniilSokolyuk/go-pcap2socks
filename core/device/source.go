@@ -21,6 +21,16 @@ type FrameSource interface {
 	Close() error
 }
 
+// BatchWriter is an optional extension of FrameSource for sources that can
+// send several frames for the price of one call. The device hands over
+// whatever the stack has queued, so under load a batch replaces one system
+// call per frame with one per batch.
+type BatchWriter interface {
+	// WriteFrames sends the frames in order. Implementations must not retain
+	// them.
+	WriteFrames(frames [][]byte) error
+}
+
 // MemSource is an in-memory FrameSource. The device side reads with ReadFrame
 // and writes with WriteFrame; the opposite side (a test harness acting as the
 // wire) injects frames with Inject and consumes them from Outbound.

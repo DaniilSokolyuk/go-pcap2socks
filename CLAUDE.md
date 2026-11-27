@@ -92,7 +92,7 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 - `pcapsource.go`: the live pcap handle implementation and the BPF filter
 - `ethernet.go`: the device itself — inbound filtering to the configured network, MAC learning into the stack's neighbor cache, gratuitous ARP on open
 - `device.go`: Device interface abstraction
-- `iobased/endpoint.go`: I/O based endpoint for gVisor integration; its `ReadWriter.Read` returns an error to terminate the dispatch loop when the source dies
+- `iobased/endpoint.go`: I/O based endpoint for gVisor integration; its `ReadWriter.Read` returns an error to terminate the dispatch loop when the source dies; the outbound loop is the sending goroutine: it hands queued packets to the source in batches, times each write, and a full queue discards its oldest packets (`TxStats`)
 - Optional debug packet capture for troubleshooting
 
 **Tunnel (tunnel/)**
