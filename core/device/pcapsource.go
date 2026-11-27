@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"runtime"
 
 	"github.com/gopacket/gopacket/pcap"
 )
@@ -21,9 +22,34 @@ type pcapSource struct {
 }
 
 var (
-	_ FrameSource = (*pcapSource)(nil)
-	_ BatchWriter = (*pcapSource)(nil)
+	_ FrameSource       = (*pcapSource)(nil)
+	_ BatchWriter       = (*pcapSource)(nil)
+	_ ChecksumOffloader = (*pcapSource)(nil)
 )
+
+// captureSnapLen is how much of a frame is captured: all of it, whatever its
+// size. A network adapter that coalesces received TCP segments (RSC on
+// Windows, LRO elsewhere) hands the capture packets of up to 64KB, and
+// anything shorter than that truncates them. The stack discards a truncated
+// packet, so a bulk upload from the device crawls with nothing in the log;
+// this is what a snap length of 1600 did.
+const captureSnapLen = 1<<16 + 32
+
+// captureBufferSize is the kernel buffer for captured frames. Npcap takes
+// whatever it is asked for, and needs more than the old half megabyte now
+// that one packet can be 64KB. A BPF device is capped by the system
+// (debug.bpf_maxbufsize, 512KB by default on macOS) and refuses more.
+func captureBufferSize() int {
+	if runtime.GOOS == "windows" {
+		return 4 << 20
+	}
+	return 512 * 1024
+}
+
+// RXChecksumOffload reports that transport checksums of captured packets must
+// not be verified. A coalesced packet carries a checksum that is not valid on
+// its own; the adapter verified the segments before merging them.
+func (p *pcapSource) RXChecksumOffload() bool { return true }
 
 func newPcapSource(ifce net.Interface, netConfig *NetworkConfig) (*pcapSource, error) {
 	dev, err := findPcapDevice(ifce)
@@ -145,7 +171,7 @@ func createPcapHandle(dev pcap.Interface, promisc bool) (*pcap.InactiveHandle, e
 		return nil, fmt.Errorf("set promisc error: %w", err)
 	}
 
-	err = handle.SetSnapLen(1600)
+	err = handle.SetSnapLen(captureSnapLen)
 	if err != nil {
 		return nil, fmt.Errorf("set snap len error: %w", err)
 	}
@@ -160,7 +186,7 @@ func createPcapHandle(dev pcap.Interface, promisc bool) (*pcap.InactiveHandle, e
 		return nil, fmt.Errorf("set immediate mode error: %w", err)
 	}
 
-	err = handle.SetBufferSize(512 * 1024)
+	err = handle.SetBufferSize(captureBufferSize())
 	if err != nil {
 		return nil, fmt.Errorf("set buffer size error: %w", err)
 	}
