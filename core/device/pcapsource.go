@@ -1,3 +1,5 @@
+//go:build !linux
+
 package device
 
 import (
@@ -9,7 +11,8 @@ import (
 	"github.com/gopacket/gopacket/pcap"
 )
 
-// pcapSource is the production FrameSource, backed by a live pcap handle.
+// pcapSource is the FrameSource for every platform but Linux, backed by a
+// live pcap handle. Linux talks to the kernel itself, see afpacket_linux.go.
 type pcapSource struct {
 	handle *pcap.Handle
 }
@@ -72,33 +75,6 @@ func (p *pcapSource) WriteFrame(frame []byte) error {
 func (p *pcapSource) Close() error {
 	p.handle.Close()
 	return nil
-}
-
-// BPFFilter builds the capture filter for the configured network.
-//
-// 1. ARP packets: (arp dst host <localIP> and arp src net <network> and not arp src host <localIP>)
-//   - Only ARP requests TO us (arp dst host)
-//   - From devices in our network (arp src net)
-//   - Not from ourselves (not arp src host) - loop prevention
-//
-// 2. IPv4 packets: (src net <network> and not dst net <network> and not (icmp and src host <localIP>))
-//   - All IPv4 packets from the configured network
-//   - Not destined to the local network (only capture internet-bound traffic)
-//   - Exclude ICMP from ourselves (loop prevention in promiscuous mode)
-//
-// ARP field access in BPF:
-//   - "arp src host X" / "arp src net X" - checks Source Protocol Address (SPA) field
-//   - "arp dst host X" / "arp dst net X" - checks Target Protocol Address (TPA) field
-func BPFFilter(netConfig *NetworkConfig) string {
-	return fmt.Sprintf(
-		"(arp dst host %s and arp src net %s and not arp src host %s) or (src net %s and not dst net %s and not (icmp and src host %s))",
-		netConfig.LocalIP.String(),
-		netConfig.Network.String(),
-		netConfig.LocalIP.String(),
-		netConfig.Network.String(),
-		netConfig.Network.String(),
-		netConfig.LocalIP.String(),
-	)
 }
 
 // isPromiscUnsupported reports whether activation failed only because the

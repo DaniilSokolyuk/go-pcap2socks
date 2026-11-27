@@ -31,6 +31,13 @@ type BatchWriter interface {
 	WriteFrames(frames [][]byte) error
 }
 
+// frameSender is how a live source sends a batch of frames in fewer calls than
+// one per frame: sendmmsg on Linux, an Npcap send queue on Windows.
+type frameSender interface {
+	send(frames [][]byte) error
+	close() error
+}
+
 // MemSource is an in-memory FrameSource. The device side reads with ReadFrame
 // and writes with WriteFrame; the opposite side (a test harness acting as the
 // wire) injects frames with Inject and consumes them from Outbound.

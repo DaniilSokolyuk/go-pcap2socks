@@ -39,12 +39,12 @@ sudo go-pcap2socks
 
 ## Installation
 
-go-pcap2socks depends on libpcap and is fully compatible with any version on any platform.
+go-pcap2socks captures with libpcap on macOS and Windows. On Linux it talks to the kernel directly and needs no capture library.
 
 ### Prerequisites
 
 - Go 1.26 or later ([download](https://go.dev/dl/))
-- libpcap (see platform-specific instructions below)
+- libpcap on macOS, Npcap on Windows (see platform-specific instructions below); nothing extra on Linux
 
 ### Installing from Source
 
@@ -64,19 +64,7 @@ go install github.com/DaniilSokolyuk/go-pcap2socks@main
 
 #### Linux
 
-```bash
-# Debian/Ubuntu
-sudo apt install libpcap-dev
-
-# Fedora/RHEL
-sudo dnf install libpcap-devel
-
-# Arch
-sudo pacman -S libpcap
-
-# Alpine
-sudo apk add libpcap-dev
-```
+Nothing to install.
 
 #### macOS
 
@@ -109,7 +97,7 @@ sudo go-pcap2socks /path/to/config.json
 # Install dependencies
 pkg update
 pkg install root-repo
-pkg install golang libpcap tsu
+pkg install golang tsu
 
 # Install go-pcap2socks
 go install github.com/DaniilSokolyuk/go-pcap2socks@latest

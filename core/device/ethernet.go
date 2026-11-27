@@ -47,7 +47,7 @@ var _ Device = (*ethDevice)(nil)
 
 const offset = 0
 
-// Open captures on the given interface with a live pcap handle.
+// Open captures on the given interface.
 func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -55,12 +55,12 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig) 
 		}
 	}()
 
-	src, err := newPcapSource(ifce, netConfig)
+	src, typ, err := newLiveSource(ifce, netConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	dev, err := OpenWithSource(captureCfg, src, "pcap", netConfig)
+	dev, err := OpenWithSource(captureCfg, src, typ, netConfig)
 	if err != nil {
 		_ = src.Close()
 		return nil, err

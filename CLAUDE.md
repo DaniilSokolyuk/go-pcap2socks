@@ -69,8 +69,8 @@ sudo go-pcap2socks [config.json]
 ### Environment Variables
 - `SLOG_LEVEL`: Set log level (debug, info, warn, error). Default: info
 
-### Windows Builds
-Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABLED=1` for pcap support.
+### CGO
+Windows and Linux builds use `CGO_ENABLED=0`: Windows loads Npcap's DLL at run time, Linux does not use libpcap at all. macOS and the BSDs use `CGO_ENABLED=1` for libpcap.
 
 ## Architecture
 
@@ -89,7 +89,9 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 
 **Device Layer (core/device/)**
 - `source.go`: `FrameSource`, the seam between the device and where frames come from, plus `MemSource` (an in-memory implementation used by tests)
-- `pcapsource.go`: the live pcap handle implementation and the BPF filter
+- `pcapsource.go`: the live pcap handle implementation, every platform but Linux
+- `afpacket_linux.go`, `framesender_linux.go`: the Linux implementation — gopacket's `afpacket` ring for capture and a packet socket with `sendmmsg` for batched transmit
+- `bpf.go`: the capture filter, as text for libpcap (`BPFFilter`) and as a BPF program for Linux (`CaptureFilter`); keep the two in step
 - `ethernet.go`: the device itself — inbound filtering to the configured network, MAC learning into the stack's neighbor cache, gratuitous ARP on open
 - `device.go`: Device interface abstraction
 - `iobased/endpoint.go`: I/O based endpoint for gVisor integration; its `ReadWriter.Read` returns an error to terminate the dispatch loop when the source dies; the outbound loop is the sending goroutine: it hands queued packets to the source in batches, times each write, and a full queue discards its oldest packets (`TxStats`)
@@ -160,6 +162,8 @@ Config supports:
 ### Platform-Specific Considerations
 
 - **Windows**: Uses CGO_ENABLED=0, special DNS resolution
-- **Unix-like**: Uses CGO for pcap, platform-specific socket options
+- **Linux**: Uses CGO_ENABLED=0, captures on a packet socket without libpcap
+- **macOS, BSD**: Use CGO for pcap
+- **Unix-like**: platform-specific socket options
 - **Darwin**: Special handling for interface gateway discovery
 - Socket options vary per platform (IP_BOUND_IF, SO_BINDTODEVICE, etc.)

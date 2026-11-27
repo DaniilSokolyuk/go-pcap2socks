@@ -19,17 +19,16 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux builds
+          # Linux builds: no cgo, the capture is a packet socket driven from Go
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            cgo: '1'
+            cgo: '0'
             target: go-pcap2socks-linux-amd64
           - os: ubuntu-latest
             goos: linux
             goarch: arm64
-            cgo: '1'
-            cc: aarch64-linux-gnu-gcc
+            cgo: '0'
             target: go-pcap2socks-linux-arm64
           # macOS builds
           - os: macos-latest
@@ -53,27 +52,6 @@ jobs:
         with:
           go-version: stable
 
-      - name: Install dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libpcap-dev
-          # Install cross-compiler for ARM64
-          if [ "${{ matrix.goarch }}" = "arm64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-            # Setup libpcap for ARM64 cross-compilation
-            cd /tmp
-            wget http://www.tcpdump.org/release/libpcap-1.10.1.tar.gz
-            tar xzf libpcap-1.10.1.tar.gz
-            cd libpcap-1.10.1
-            export CC=aarch64-linux-gnu-gcc
-            ./configure --host=aarch64-linux --with-pcap=linux
-            make
-            sudo make install DESTDIR=/tmp/libpcap-arm64
-            echo "CGO_LDFLAGS=-L/tmp/libpcap-arm64/usr/local/lib" >> $GITHUB_ENV
-            echo "CGO_CFLAGS=-I/tmp/libpcap-arm64/usr/local/include" >> $GITHUB_ENV
-          fi
-
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: brew install libpcap
@@ -96,7 +74,6 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.cgo }}
-          CC: ${{ matrix.cc }}
         run: |
           go build -ldflags="-s -w" -o ${{ matrix.target }} .
 
