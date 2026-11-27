@@ -43,7 +43,7 @@ go-pcap2socks captures with libpcap on macOS and Windows. On Linux it talks to t
 
 ### Prerequisites
 
-- Go 1.26 or later ([download](https://go.dev/dl/))
+- Go 1.27 or later ([download](https://go.dev/dl/))
 - libpcap on macOS, Npcap on Windows (see platform-specific instructions below); nothing extra on Linux
 
 ### Installing from Source

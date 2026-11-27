@@ -51,6 +51,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: stable
+          check-latest: true
 
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
