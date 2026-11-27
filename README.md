@@ -245,7 +245,9 @@ Configures the DNS servers used by the `dns` outbound. When a device's DNS query
   - Type: String
   - Required: Yes
   - Values: "local" or "host:port" (e.g. "8.8.8.8:53" - the port is not optional)
-  - Description: DNS server address. "local" resolves through the operating system's own DNS configuration, which is what makes sharing a VPN work: queries follow whatever resolver the VPN pushed to the host
+  - Description: DNS server address. "local" resolves through the operating system's own DNS servers, which is what makes sharing a VPN work: queries follow the resolver the VPN gave the host. On Windows these are the servers of every active adapter, most preferred adapter first (a VPN's before the physical adapter's); on Linux and macOS, the servers in `/etc/resolv.conf`
+
+A `dns` outbound with no servers configured uses `"local"`. If every server fails, the device gets a SERVFAIL answer.
 
 ### routing
 

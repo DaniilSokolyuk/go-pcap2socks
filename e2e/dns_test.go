@@ -150,3 +150,36 @@ func waitForGoroutines(max int, timeout time.Duration) int {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// TestDNSAnswerComesFromTheResolverAsked pins the reply address when one
+// socket asks two resolvers, as a stub resolver falling back to its secondary
+// server does. A UDP session is keyed on the console's address only, so both
+// queries share a session, and the answer to the second used to appear to
+// come from the first resolver, where the console would discard it.
+func TestDNSAnswerComesFromTheResolverAsked(t *testing.T) {
+	h := dnsHarness(t, net.IPv4(198, 51, 100, 7))
+	secondary := netip.MustParseAddrPort("203.0.113.54:53")
+
+	conn, err := h.Client.DialUDP()
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
+
+	for _, resolver := range []netip.AddrPort{dnsDst, secondary, dnsDst} {
+		msg := new(dns.Msg)
+		msg.SetQuestion("example.com.", dns.TypeA)
+		packed, err := msg.Pack()
+		require.NoError(t, err)
+		_, err = conn.WriteTo(packed, udpAddr(t, resolver))
+		require.NoError(t, err)
+
+		buf := make([]byte, 4096)
+		n, from, err := conn.ReadFrom(buf)
+		require.NoError(t, err)
+		assert.Equal(t, resolver.String(), from.String())
+
+		resp := new(dns.Msg)
+		require.NoError(t, resp.Unpack(buf[:n]))
+		assert.Equal(t, msg.Id, resp.Id)
+	}
+}

@@ -166,6 +166,64 @@ func TestLoad(t *testing.T) {
 	})
 }
 
+func TestLoadValidatesDNS(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.json")
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+		return path
+	}
+
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "local and host:port servers",
+			body: `{"dns":{"servers":[{"address":"local"},{"address":"8.8.8.8:53"},{"address":"[2606:4700:4700::1111]:53"}]},
+			        "outbounds":[{"tag":"","direct":{}},{"tag":"dns-out","dns":{}}]}`,
+		},
+		{
+			name: "no dns outbound, no servers",
+			body: `{"outbounds":[{"tag":"","direct":{}}]}`,
+		},
+		{
+			name:    "a server without a port",
+			body:    `{"dns":{"servers":[{"address":"8.8.8.8"}]},"outbounds":[{"tag":"","direct":{}}]}`,
+			wantErr: "host:port",
+		},
+		{
+			name:    "a port that is not one",
+			body:    `{"dns":{"servers":[{"address":"8.8.8.8:dns"}]},"outbounds":[{"tag":"","direct":{}}]}`,
+			wantErr: "invalid port",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(write(t, tt.body))
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+// A dns outbound with no servers to ask used to load fine and then never
+// answer a query. It now asks the system's resolver.
+func TestLoadDefaultsDNSOutboundToLocal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	body := `{"outbounds":[{"tag":"","direct":{}},{"tag":"dns-out","dns":{}}]}`
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+
+	config, err := Load(path)
+	require.NoError(t, err)
+	require.Len(t, config.DNS.Servers, 1)
+	assert.Equal(t, "local", config.DNS.Servers[0].Address)
+}
+
 func TestExists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

@@ -125,8 +125,9 @@ Windows and Linux builds use `CGO_ENABLED=0`: Windows loads Npcap's DLL at run t
 - Separate implementations for Linux, Darwin, FreeBSD, OpenBSD, Windows
 
 **DNS (dns/)**
-- `local.go`: Local DNS resolver
-- `local_unix.go`, `local_windows.go`: Platform-specific DNS resolution
+- `local.go`: resolves through the system's own DNS servers, re-reading them every few seconds
+- `local_unix.go`: the servers in `/etc/resolv.conf`
+- `local_windows.go`, `servers.go`: the servers of every active adapter, most preferred adapter first, so that a VPN's resolver is asked before the physical adapter's
 
 **ARP (arpr/)**
 - `arp.go`: Gratuitous ARP implementation for network announcement

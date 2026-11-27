@@ -5,7 +5,6 @@ package dns
 import (
 	"net/netip"
 	"os"
-	"slices"
 	"strconv"
 	"syscall"
 	"unsafe"
@@ -14,77 +13,48 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func (lc *localClient) getConfig() (*dns.ClientConfig, error) {
-	if lc.config == nil {
-		config := &dns.ClientConfig{
-			Servers:  []string{},
-			Search:   []string{},
-			Port:     "53",
-			Ndots:    1,
-			Timeout:  5,
-			Attempts: 2,
-		}
-
-		addresses, err := adapterAddresses()
-		if err != nil {
-			return nil, err
-		}
-
-		for _, aa := range addresses {
-			if aa.OperStatus != windows.IfOperStatusUp {
-				continue
-			}
-			if aa.IfType == windows.IF_TYPE_TUNNEL {
-				continue
-			}
-			if aa.FirstGatewayAddress == nil {
-				continue
-			}
-			for dns := aa.FirstDnsServerAddress; dns != nil; dns = dns.Next {
-				rawSockaddr, err := dns.Address.Sockaddr.Sockaddr()
-				if err != nil {
-					continue
-				}
-				var dnsServerAddr netip.Addr
-				switch sockaddr := rawSockaddr.(type) {
-				case *syscall.SockaddrInet4:
-					dnsServerAddr = netip.AddrFrom4(sockaddr.Addr)
-				case *syscall.SockaddrInet6:
-					if sockaddr.Addr[0] == 0xfe && sockaddr.Addr[1] == 0xc0 {
-						// fec0/10 IPv6 addresses are site local anycast DNS
-						// addresses Microsoft sets by default if no other
-						// IPv6 DNS address is set. Site local anycast is
-						// deprecated since 2004, see
-						// https://datatracker.ietf.org/doc/html/rfc3879
-						continue
-					}
-					dnsServerAddr = netip.AddrFrom16(sockaddr.Addr)
-					if sockaddr.ZoneId != 0 {
-						dnsServerAddr = dnsServerAddr.WithZone(strconv.FormatInt(int64(sockaddr.ZoneId), 10))
-					}
-				default:
-					// Unexpected type.
-					continue
-				}
-
-				ifName := windows.UTF16PtrToString(aa.FriendlyName)
-				if ifName != lc.interfaceName {
-					continue
-				}
-
-				ipStr := dnsServerAddr.String()
-
-				if slices.Contains(config.Servers, ipStr) {
-					continue
-				}
-
-				config.Servers = append(config.Servers, ipStr)
-			}
-		}
-
-		lc.config = config
+// loadSystemConfig collects the DNS servers of every adapter that is up, in
+// the order of the adapters' metrics.
+func loadSystemConfig() (*dns.ClientConfig, error) {
+	addresses, err := adapterAddresses()
+	if err != nil {
+		return nil, err
 	}
-	return lc.config, nil
+
+	adapters := make([]adapter, 0, len(addresses))
+	for _, aa := range addresses {
+		a := adapter{
+			up:       aa.OperStatus == windows.IfOperStatusUp,
+			loopback: aa.IfType == windows.IF_TYPE_SOFTWARE_LOOPBACK,
+			metric:   aa.Ipv4Metric,
+		}
+		for server := aa.FirstDnsServerAddress; server != nil; server = server.Next {
+			rawSockaddr, err := server.Address.Sockaddr.Sockaddr()
+			if err != nil {
+				continue
+			}
+			switch sockaddr := rawSockaddr.(type) {
+			case *syscall.SockaddrInet4:
+				a.servers = append(a.servers, netip.AddrFrom4(sockaddr.Addr))
+			case *syscall.SockaddrInet6:
+				addr := netip.AddrFrom16(sockaddr.Addr)
+				if sockaddr.ZoneId != 0 {
+					addr = addr.WithZone(strconv.FormatInt(int64(sockaddr.ZoneId), 10))
+				}
+				a.servers = append(a.servers, addr)
+			}
+		}
+		adapters = append(adapters, a)
+	}
+
+	return &dns.ClientConfig{
+		Servers:  systemServers(adapters),
+		Search:   []string{},
+		Port:     "53",
+		Ndots:    1,
+		Timeout:  5,
+		Attempts: 2,
+	}, nil
 }
 
 func adapterAddresses() ([]*windows.IpAdapterAddresses, error) {

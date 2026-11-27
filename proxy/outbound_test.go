@@ -175,7 +175,7 @@ func TestDNSOutbound(t *testing.T) {
 
 	p := NewDNS(cfg.DNS{Servers: []struct {
 		Address string `json:"address"`
-	}{{Address: upstream}}}, "")
+	}{{Address: upstream}}})
 
 	md := &M.Metadata{Network: M.UDP, DstIP: net.IPv4(1, 1, 1, 1), DstPort: 53}
 	pc, err := p.DialUDP(md)
@@ -203,10 +203,47 @@ func TestDNSOutbound(t *testing.T) {
 	assert.Equal(t, "198.51.100.7", resp.Answer[0].(*dns.A).A.String())
 }
 
+// TestDNSOutboundAnswersServfailWhenEveryServerFails checks the device is told
+// resolution failed, instead of being left to wait out its own timeout.
+func TestDNSOutboundAnswersServfailWhenEveryServerFails(t *testing.T) {
+	// A port nothing listens on: the exchange fails at once.
+	dead, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	deadAddr := dead.LocalAddr().String()
+	require.NoError(t, dead.Close())
+
+	p := NewDNS(cfg.DNS{Servers: []struct {
+		Address string `json:"address"`
+	}{{Address: deadAddr}}})
+
+	md := &M.Metadata{Network: M.UDP, DstIP: net.IPv4(1, 1, 1, 1), DstPort: 53}
+	pc, err := p.DialUDP(md)
+	require.NoError(t, err)
+	defer pc.Close()
+
+	query := new(dns.Msg)
+	query.SetQuestion("example.com.", dns.TypeA)
+	packed, err := query.Pack()
+	require.NoError(t, err)
+	_, err = pc.WriteTo(packed, md.UDPAddr())
+	require.NoError(t, err)
+
+	require.NoError(t, pc.SetReadDeadline(time.Now().Add(10*time.Second)))
+	buf := make([]byte, 4096)
+	n, _, err := pc.ReadFrom(buf)
+	require.NoError(t, err)
+
+	resp := new(dns.Msg)
+	require.NoError(t, resp.Unpack(buf[:n]))
+	assert.Equal(t, dns.RcodeServerFailure, resp.Rcode)
+	assert.Equal(t, query.Id, resp.Id)
+	assert.True(t, resp.Response)
+}
+
 // TestDNSOutboundReadDeadline pins the fix for the connection that used to
 // ignore deadlines and block forever when no answer arrived.
 func TestDNSOutboundReadDeadline(t *testing.T) {
-	p := NewDNS(cfg.DNS{}, "")
+	p := NewDNS(cfg.DNS{})
 
 	pc, err := p.DialUDP(&M.Metadata{Network: M.UDP, DstIP: net.IPv4(1, 1, 1, 1), DstPort: 53})
 	require.NoError(t, err)
@@ -223,7 +260,7 @@ func TestDNSOutboundReadDeadline(t *testing.T) {
 // TestDNSOutboundCloseUnblocksRead checks closing the session wakes a pending
 // reader instead of stranding it.
 func TestDNSOutboundCloseUnblocksRead(t *testing.T) {
-	p := NewDNS(cfg.DNS{}, "")
+	p := NewDNS(cfg.DNS{})
 
 	pc, err := p.DialUDP(&M.Metadata{Network: M.UDP, DstIP: net.IPv4(1, 1, 1, 1), DstPort: 53})
 	require.NoError(t, err)

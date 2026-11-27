@@ -67,6 +67,37 @@ func (c *Config) Normalize() error {
 		}
 	}
 
+	return c.validateDNS()
+}
+
+// validateDNS checks the dns section, and fills it in when a dns outbound has
+// nothing to ask: an outbound that silently never answers is no use to anyone,
+// and the system's own resolver is what the default configuration uses.
+func (c *Config) validateDNS() error {
+	for i, server := range c.DNS.Servers {
+		if server.Address == "local" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(server.Address)
+		if err != nil || host == "" {
+			return fmt.Errorf("dns server %d: %q must be \"local\" or host:port, for example \"8.8.8.8:53\"", i, server.Address)
+		}
+		if _, err = strconv.ParseUint(port, 10, 16); err != nil {
+			return fmt.Errorf("dns server %d: invalid port in %q", i, server.Address)
+		}
+	}
+
+	if len(c.DNS.Servers) > 0 {
+		return nil
+	}
+	for _, outbound := range c.Outbounds {
+		if outbound.DNS != nil {
+			c.DNS.Servers = append(c.DNS.Servers, struct {
+				Address string `json:"address"`
+			}{Address: "local"})
+			break
+		}
+	}
 	return nil
 }
 
