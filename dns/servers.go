@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"math"
 	"net"
 	"net/netip"
 	"sort"
@@ -24,6 +25,21 @@ type adapter struct {
 	// prefers it. A VPN gives itself a low metric to take over.
 	metric  uint32
 	servers []netip.Addr
+}
+
+// adapterMetric picks the metric an adapter is ranked by. Windows reports an
+// interface index of zero for a protocol the adapter does not run, and the
+// metric next to it is then zero as well - which would put an adapter without
+// IPv4 ahead of every other one.
+func adapterMetric(ipv4Index, ipv4Metric, ipv6Index, ipv6Metric uint32) uint32 {
+	switch {
+	case ipv4Index != 0:
+		return ipv4Metric
+	case ipv6Index != 0:
+		return ipv6Metric
+	default:
+		return math.MaxUint32
+	}
 }
 
 // systemServers lists the DNS servers of every adapter that is up, most

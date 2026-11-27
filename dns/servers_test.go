@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"math"
 	"net/netip"
 	"testing"
 
@@ -75,4 +76,10 @@ func TestServerAddress(t *testing.T) {
 	assert.Equal(t, "[2606:4700:4700::1111]:53", serverAddress("2606:4700:4700::1111", "53"))
 	assert.Equal(t, "[fe80::1%12]:53", serverAddress("fe80::1%12", "53"))
 	assert.Equal(t, "[::1]:5353", serverAddress("[::1]", "5353"))
+}
+
+func TestAdapterMetric(t *testing.T) {
+	assert.Equal(t, uint32(25), adapterMetric(7, 25, 7, 40), "IPv4 metric when the adapter runs IPv4")
+	assert.Equal(t, uint32(40), adapterMetric(0, 0, 7, 40), "IPv6 metric for an adapter without IPv4")
+	assert.Equal(t, uint32(math.MaxUint32), adapterMetric(0, 0, 0, 0), "last when it runs neither")
 }

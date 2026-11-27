@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/miekg/dns"
@@ -26,7 +27,7 @@ func loadSystemConfig() (*dns.ClientConfig, error) {
 		a := adapter{
 			up:       aa.OperStatus == windows.IfOperStatusUp,
 			loopback: aa.IfType == windows.IF_TYPE_SOFTWARE_LOOPBACK,
-			metric:   aa.Ipv4Metric,
+			metric:   adapterMetric(aa.IfIndex, aa.Ipv4Metric, aa.Ipv6IfIndex, aa.Ipv6Metric),
 		}
 		for server := aa.FirstDnsServerAddress; server != nil; server = server.Next {
 			rawSockaddr, err := server.Address.Sockaddr.Sockaddr()
@@ -52,7 +53,7 @@ func loadSystemConfig() (*dns.ClientConfig, error) {
 		Search:   []string{},
 		Port:     "53",
 		Ndots:    1,
-		Timeout:  5,
+		Timeout:  int(serverTimeout / time.Second),
 		Attempts: 2,
 	}, nil
 }

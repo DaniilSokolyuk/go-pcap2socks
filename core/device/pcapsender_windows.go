@@ -135,7 +135,8 @@ func (s *queueSender) send(frames [][]byte) error {
 	ret, _, _ := syscall.SyscallN(s.procs.transmit, s.pcapT, queue, 0)
 	// The function returns a 32 bit count; the rest of the register is noise.
 	sent := uintptr(uint32(ret))
-	if sent < size {
+	// Anything but the whole queue is a failure, including a count above it.
+	if sent != size {
 		return fmt.Errorf("pcap_sendqueue_transmit sent %d of %d bytes: %w", sent, size, s.handle.Error())
 	}
 	return nil

@@ -18,6 +18,11 @@ type LocalClient interface {
 // enough that a burst of queries does not ask the system for each one.
 const configTTL = 5 * time.Second
 
+// serverTimeout is how long one server is given before the next is asked.
+// Servers are asked in turn, so a dead one first in the list costs this much
+// on every lookup; Windows itself gives up on a server after a second.
+const serverTimeout = 2 * time.Second
+
 type localClient struct {
 	client *dns.Client
 
@@ -29,7 +34,7 @@ type localClient struct {
 func NewLocalClient() LocalClient {
 	return &localClient{
 		client: &dns.Client{
-			Timeout: 5 * time.Second,
+			Timeout: serverTimeout,
 			UDPSize: dns.DefaultMsgSize,
 		},
 	}

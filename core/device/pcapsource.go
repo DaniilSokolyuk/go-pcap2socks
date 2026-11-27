@@ -46,7 +46,7 @@ func captureBufferSize() int {
 	return 512 * 1024
 }
 
-// RXChecksumOffload reports that transport checksums of captured packets must
+// RXChecksumOffload reports that IP and transport checksums of captured packets must
 // not be verified. A coalesced packet carries a checksum that is not valid on
 // its own; the adapter verified the segments before merging them.
 func (p *pcapSource) RXChecksumOffload() bool { return true }

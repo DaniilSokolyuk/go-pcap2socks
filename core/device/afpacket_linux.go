@@ -28,9 +28,10 @@ import (
 // Mbit/s with nothing in the log. Read whole, the same merged packets are an
 // advantage: one large segment for the stack instead of forty small ones.
 type afpacketSource struct {
-	fd     int
-	tx     frameSender
-	closed atomic.Bool
+	fd      int
+	ifindex int
+	tx      frameSender
+	closed  atomic.Bool
 
 	// A batch of received frames, and the one to hand out next.
 	msgs    []mmsghdr
@@ -134,6 +135,7 @@ func newAFPacketSource(ifce net.Interface, netConfig *NetworkConfig) (_ *afpacke
 
 	s := &afpacketSource{
 		fd:        fd,
+		ifindex:   ifce.Index,
 		tx:        tx,
 		msgs:      make([]mmsghdr, captureBatch),
 		iovs:      make([]unix.Iovec, captureBatch),
@@ -150,7 +152,7 @@ func newAFPacketSource(ifce net.Interface, netConfig *NetworkConfig) (_ *afpacke
 	return s, nil
 }
 
-// RXChecksumOffload reports that transport checksums of captured packets must
+// RXChecksumOffload reports that IP and transport checksums of captured packets must
 // not be verified. A packet merged by receive offload carries the checksum of
 // a packet that no longer exists; the kernel verified the originals before
 // merging them.
@@ -188,11 +190,13 @@ func (s *afpacketSource) ReadFrame() ([]byte, error) {
 	case err != nil:
 		s.release()
 		return nil, fmt.Errorf("poll capture socket: %w", err)
-	case fds[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 && fds[0].Revents&unix.POLLIN == 0:
-		// The interface went down or away.
+	case fds[0].Revents&(unix.POLLHUP|unix.POLLNVAL) != 0 && fds[0].Revents&unix.POLLIN == 0:
 		s.release()
 		return nil, errors.New("capture socket failed")
 	}
+	// POLLERR is not decided here: the read below returns the socket's pending
+	// error, which is how an interface that merely went down is told apart
+	// from anything worse.
 
 	n, _, errno := unix.Syscall6(unix.SYS_RECVMMSG,
 		uintptr(s.fd), uintptr(unsafe.Pointer(&s.msgs[0])), uintptr(len(s.msgs)), unix.MSG_DONTWAIT, 0, 0)
@@ -200,8 +204,14 @@ func (s *afpacketSource) ReadFrame() ([]byte, error) {
 	case errno == unix.EINTR || errno == unix.EAGAIN:
 		return nil, nil
 	case errno == unix.ENETDOWN:
-		// Reported once when the interface goes down; frames follow again
-		// when it comes back.
+		// Reported once when the interface goes down, and once more when it
+		// is removed. Down is survivable - Wi-Fi reconnecting - and frames
+		// follow again when it comes back; removed is not.
+		if _, err := net.InterfaceByIndex(s.ifindex); err != nil {
+			s.release()
+			return nil, errors.New("capture interface is gone")
+		}
+		slog.Warn("capture interface went down, waiting for it to come back")
 		return nil, nil
 	case errno != 0:
 		s.release()
