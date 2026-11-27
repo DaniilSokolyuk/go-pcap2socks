@@ -2,17 +2,10 @@
 
 package dns
 
-import (
-	"github.com/miekg/dns"
-)
+import "github.com/miekg/dns"
 
-func (lc *localClient) getConfig() (*dns.ClientConfig, error) {
-	if lc.config == nil {
-		config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-		if err != nil {
-			return nil, err
-		}
-		lc.config = config
-	}
-	return lc.config, nil
+// loadSystemConfig reads the resolver configuration the system publishes for
+// programs like this one.
+func loadSystemConfig() (*dns.ClientConfig, error) {
+	return dns.ClientConfigFromFile("/etc/resolv.conf")
 }

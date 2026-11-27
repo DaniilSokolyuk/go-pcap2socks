@@ -1,3 +1,5 @@
+//go:build !linux
+
 package device
 
 import (
@@ -5,16 +7,49 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"runtime"
 
 	"github.com/gopacket/gopacket/pcap"
 )
 
-// pcapSource is the production FrameSource, backed by a live pcap handle.
+// pcapSource is the FrameSource for every platform but Linux, backed by a
+// live pcap handle. Linux talks to the kernel itself, see afpacket_linux.go.
 type pcapSource struct {
 	handle *pcap.Handle
+	// tx sends a batch in one call where the platform can; nil where it
+	// cannot, and then frames go out one at a time.
+	tx frameSender
 }
 
-var _ FrameSource = (*pcapSource)(nil)
+var (
+	_ FrameSource       = (*pcapSource)(nil)
+	_ BatchWriter       = (*pcapSource)(nil)
+	_ ChecksumOffloader = (*pcapSource)(nil)
+)
+
+// captureSnapLen is how much of a frame is captured: all of it, whatever its
+// size. A network adapter that coalesces received TCP segments (RSC on
+// Windows, LRO elsewhere) hands the capture packets of up to 64KB, and
+// anything shorter than that truncates them. The stack discards a truncated
+// packet, so a bulk upload from the device crawls with nothing in the log;
+// this is what a snap length of 1600 did.
+const captureSnapLen = 1<<16 + 32
+
+// captureBufferSize is the kernel buffer for captured frames. Npcap takes
+// whatever it is asked for, and needs more than the old half megabyte now
+// that one packet can be 64KB. A BPF device is capped by the system
+// (debug.bpf_maxbufsize, 512KB by default on macOS) and refuses more.
+func captureBufferSize() int {
+	if runtime.GOOS == "windows" {
+		return 4 << 20
+	}
+	return 512 * 1024
+}
+
+// RXChecksumOffload reports that IP and transport checksums of captured packets must
+// not be verified. A coalesced packet carries a checksum that is not valid on
+// its own; the adapter verified the segments before merging them.
+func (p *pcapSource) RXChecksumOffload() bool { return true }
 
 func newPcapSource(ifce net.Interface, netConfig *NetworkConfig) (*pcapSource, error) {
 	dev, err := findPcapDevice(ifce)
@@ -53,7 +88,27 @@ func newPcapSource(ifce net.Interface, netConfig *NetworkConfig) (*pcapSource, e
 		return nil, fmt.Errorf("set bpf filter error: %w", err)
 	}
 
-	return &pcapSource{handle: handle}, nil
+	src := &pcapSource{handle: handle}
+	if tx, err := newPcapFrameSender(handle); err != nil {
+		slog.Warn("batched sending is unavailable, sending one frame at a time", "reason", err)
+	} else {
+		src.tx = tx
+	}
+	return src, nil
+}
+
+// WriteFrames sends a batch of frames, in one call where the platform has a
+// way to do that.
+func (p *pcapSource) WriteFrames(frames [][]byte) error {
+	if p.tx != nil {
+		return p.tx.send(frames)
+	}
+	for _, frame := range frames {
+		if err := p.handle.WritePacketData(frame); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *pcapSource) ReadFrame() ([]byte, error) {
@@ -70,35 +125,11 @@ func (p *pcapSource) WriteFrame(frame []byte) error {
 }
 
 func (p *pcapSource) Close() error {
+	if p.tx != nil {
+		_ = p.tx.close()
+	}
 	p.handle.Close()
 	return nil
-}
-
-// BPFFilter builds the capture filter for the configured network.
-//
-// 1. ARP packets: (arp dst host <localIP> and arp src net <network> and not arp src host <localIP>)
-//   - Only ARP requests TO us (arp dst host)
-//   - From devices in our network (arp src net)
-//   - Not from ourselves (not arp src host) - loop prevention
-//
-// 2. IPv4 packets: (src net <network> and not dst net <network> and not (icmp and src host <localIP>))
-//   - All IPv4 packets from the configured network
-//   - Not destined to the local network (only capture internet-bound traffic)
-//   - Exclude ICMP from ourselves (loop prevention in promiscuous mode)
-//
-// ARP field access in BPF:
-//   - "arp src host X" / "arp src net X" - checks Source Protocol Address (SPA) field
-//   - "arp dst host X" / "arp dst net X" - checks Target Protocol Address (TPA) field
-func BPFFilter(netConfig *NetworkConfig) string {
-	return fmt.Sprintf(
-		"(arp dst host %s and arp src net %s and not arp src host %s) or (src net %s and not dst net %s and not (icmp and src host %s))",
-		netConfig.LocalIP.String(),
-		netConfig.Network.String(),
-		netConfig.LocalIP.String(),
-		netConfig.Network.String(),
-		netConfig.Network.String(),
-		netConfig.LocalIP.String(),
-	)
 }
 
 // isPromiscUnsupported reports whether activation failed only because the
@@ -140,7 +171,7 @@ func createPcapHandle(dev pcap.Interface, promisc bool) (*pcap.InactiveHandle, e
 		return nil, fmt.Errorf("set promisc error: %w", err)
 	}
 
-	err = handle.SetSnapLen(1600)
+	err = handle.SetSnapLen(captureSnapLen)
 	if err != nil {
 		return nil, fmt.Errorf("set snap len error: %w", err)
 	}
@@ -155,7 +186,7 @@ func createPcapHandle(dev pcap.Interface, promisc bool) (*pcap.InactiveHandle, e
 		return nil, fmt.Errorf("set immediate mode error: %w", err)
 	}
 
-	err = handle.SetBufferSize(512 * 1024)
+	err = handle.SetBufferSize(captureBufferSize())
 	if err != nil {
 		return nil, fmt.Errorf("set buffer size error: %w", err)
 	}

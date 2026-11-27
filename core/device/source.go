@@ -21,6 +21,31 @@ type FrameSource interface {
 	Close() error
 }
 
+// BatchWriter is an optional extension of FrameSource for sources that can
+// send several frames for the price of one call. The device hands over
+// whatever the stack has queued, so under load a batch replaces one system
+// call per frame with one per batch.
+type BatchWriter interface {
+	// WriteFrames sends the frames in order. Implementations must not retain
+	// them.
+	WriteFrames(frames [][]byte) error
+}
+
+// ChecksumOffloader is an optional extension of FrameSource. A source whose
+// frames may carry IP and transport checksums that are not valid on their own - the
+// kernel merged several packets into one - says so, and the stack then leaves
+// them unverified.
+type ChecksumOffloader interface {
+	RXChecksumOffload() bool
+}
+
+// frameSender is how a live source sends a batch of frames in fewer calls than
+// one per frame: sendmmsg on Linux, an Npcap send queue on Windows.
+type frameSender interface {
+	send(frames [][]byte) error
+	close() error
+}
+
 // MemSource is an in-memory FrameSource. The device side reads with ReadFrame
 // and writes with WriteFrame; the opposite side (a test harness acting as the
 // wire) injects frames with Inject and consumes them from Outbound.

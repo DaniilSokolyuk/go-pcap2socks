@@ -67,7 +67,7 @@ func Start(opts Options) (*Engine, error) {
 		return nil, fmt.Errorf("network config is required")
 	}
 
-	router, err := buildProxy(opts.Config, opts.Interface.Name)
+	router, err := buildProxy(opts.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-func buildProxy(config *cfg.Config, interfaceName string) (proxy.Proxy, error) {
+func buildProxy(config *cfg.Config) (proxy.Proxy, error) {
 	proxies := make(map[string]proxy.Proxy, len(config.Outbounds))
 
 	for _, outbound := range config.Outbounds {
@@ -154,7 +154,7 @@ func buildProxy(config *cfg.Config, interfaceName string) (proxy.Proxy, error) {
 		case outbound.Reject != nil:
 			p = proxy.NewReject()
 		case outbound.DNS != nil:
-			p = proxy.NewDNS(config.DNS, interfaceName)
+			p = proxy.NewDNS(config.DNS)
 		default:
 			return nil, fmt.Errorf("invalid outbound: %+v", outbound)
 		}

@@ -39,12 +39,12 @@ sudo go-pcap2socks
 
 ## Installation
 
-go-pcap2socks depends on libpcap and is fully compatible with any version on any platform.
+go-pcap2socks captures with libpcap on macOS and Windows. On Linux it talks to the kernel directly and needs no capture library.
 
 ### Prerequisites
 
-- Go 1.26 or later ([download](https://go.dev/dl/))
-- libpcap (see platform-specific instructions below)
+- Go 1.27 or later ([download](https://go.dev/dl/))
+- libpcap on macOS, Npcap on Windows (see platform-specific instructions below); nothing extra on Linux
 
 ### Installing from Source
 
@@ -64,19 +64,7 @@ go install github.com/DaniilSokolyuk/go-pcap2socks@main
 
 #### Linux
 
-```bash
-# Debian/Ubuntu
-sudo apt install libpcap-dev
-
-# Fedora/RHEL
-sudo dnf install libpcap-devel
-
-# Arch
-sudo pacman -S libpcap
-
-# Alpine
-sudo apk add libpcap-dev
-```
+Nothing to install.
 
 #### macOS
 
@@ -109,7 +97,7 @@ sudo go-pcap2socks /path/to/config.json
 # Install dependencies
 pkg update
 pkg install root-repo
-pkg install golang libpcap tsu
+pkg install golang tsu
 
 # Install go-pcap2socks
 go install github.com/DaniilSokolyuk/go-pcap2socks@latest
@@ -129,7 +117,7 @@ The whole config is validated at startup: unknown field names (typos), invalid v
 
 ### How it works
 
-go-pcap2socks announces itself on your LAN as the gateway of the virtual network configured in `pcap`. On start it prints the settings to enter on the device: the usable IP range, subnet mask, gateway address and MTU. Give the device a static IP from that range with the printed gateway, and its internet-bound traffic arrives at go-pcap2socks, where every TCP connection and UDP session is matched against the routing rules and forwarded through the selected outbound.
+go-pcap2socks announces itself on your LAN as the gateway of the virtual network configured in `pcap`. On start it prints the settings to enter on the device: the usable IP range, subnet mask, gateway address, DNS servers and MTU. Give the device a static IP from that range with the printed gateway and DNS (go-pcap2socks does not hand out addresses, so without a DNS server set by hand nothing opens by name), and its internet-bound traffic arrives at go-pcap2socks, where every TCP connection and UDP session is matched against the routing rules and forwarded through the selected outbound.
 
 ### CLI Commands
 
@@ -257,7 +245,9 @@ Configures the DNS servers used by the `dns` outbound. When a device's DNS query
   - Type: String
   - Required: Yes
   - Values: "local" or "host:port" (e.g. "8.8.8.8:53" - the port is not optional)
-  - Description: DNS server address. "local" resolves through the operating system's own DNS configuration, which is what makes sharing a VPN work: queries follow whatever resolver the VPN pushed to the host
+  - Description: DNS server address. "local" resolves through the operating system's own DNS servers, which is what makes sharing a VPN work: queries follow the resolver the VPN gave the host. On Windows these are the servers of every active adapter, most preferred adapter first (a VPN's before the physical adapter's); on Linux and macOS, the servers in `/etc/resolv.conf`
+
+A `dns` outbound with no servers configured uses `"local"`. If every server fails, the device gets a SERVFAIL answer.
 
 ### routing
 

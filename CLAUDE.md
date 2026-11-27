@@ -69,8 +69,8 @@ sudo go-pcap2socks [config.json]
 ### Environment Variables
 - `SLOG_LEVEL`: Set log level (debug, info, warn, error). Default: info
 
-### Windows Builds
-Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABLED=1` for pcap support.
+### CGO
+Windows and Linux builds use `CGO_ENABLED=0`: Windows loads Npcap's DLL at run time, Linux does not use libpcap at all. macOS and the BSDs use `CGO_ENABLED=1` for libpcap.
 
 ## Architecture
 
@@ -89,10 +89,13 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 
 **Device Layer (core/device/)**
 - `source.go`: `FrameSource`, the seam between the device and where frames come from, plus `MemSource` (an in-memory implementation used by tests)
-- `pcapsource.go`: the live pcap handle implementation and the BPF filter
+- `pcapsource.go`: the live pcap handle implementation, every platform but Linux
+- `pcapsender_windows.go`: batched transmit on Windows through Npcap's send queue (`pcap_sendqueue_transmit`); macOS and the BSDs have no call that sends several frames, see `pcapsender_other.go`
+- `afpacket_linux.go`, `framesender_linux.go`: the Linux implementation — a packet socket read with `recvmmsg` into 64KB buffers, and one written with `sendmmsg`. The buffers are that large on purpose: with receive offload (GRO) on, the kernel hands over merged TCP segments, and anything sized for the MTU truncates them. For the same reason the source reports `RXChecksumOffload`
+- `bpf.go`: the capture filter, as text for libpcap (`BPFFilter`) and as a BPF program for Linux (`CaptureFilter`); keep the two in step
 - `ethernet.go`: the device itself — inbound filtering to the configured network, MAC learning into the stack's neighbor cache, gratuitous ARP on open
 - `device.go`: Device interface abstraction
-- `iobased/endpoint.go`: I/O based endpoint for gVisor integration; its `ReadWriter.Read` returns an error to terminate the dispatch loop when the source dies
+- `iobased/endpoint.go`: I/O based endpoint for gVisor integration; its `ReadWriter.Read` returns an error to terminate the dispatch loop when the source dies; the outbound loop is the sending goroutine: it hands queued packets to the source in batches, times each write, and a full queue discards its oldest packets (`TxStats`)
 - Optional debug packet capture for troubleshooting
 
 **Tunnel (tunnel/)**
@@ -122,8 +125,9 @@ Windows builds use `CGO_ENABLED=0` (no CGO) while other platforms use `CGO_ENABL
 - Separate implementations for Linux, Darwin, FreeBSD, OpenBSD, Windows
 
 **DNS (dns/)**
-- `local.go`: Local DNS resolver
-- `local_unix.go`, `local_windows.go`: Platform-specific DNS resolution
+- `local.go`: resolves through the system's own DNS servers, re-reading them every few seconds
+- `local_unix.go`: the servers in `/etc/resolv.conf`
+- `local_windows.go`, `servers.go`: the servers of every active adapter, most preferred adapter first, so that a VPN's resolver is asked before the physical adapter's
 
 **ARP (arpr/)**
 - `arp.go`: Gratuitous ARP implementation for network announcement
@@ -160,6 +164,8 @@ Config supports:
 ### Platform-Specific Considerations
 
 - **Windows**: Uses CGO_ENABLED=0, special DNS resolution
-- **Unix-like**: Uses CGO for pcap, platform-specific socket options
+- **Linux**: Uses CGO_ENABLED=0, captures on a packet socket without libpcap
+- **macOS, BSD**: Use CGO for pcap
+- **Unix-like**: platform-specific socket options
 - **Darwin**: Special handling for interface gateway discovery
 - Socket options vary per platform (IP_BOUND_IF, SO_BINDTODEVICE, etc.)

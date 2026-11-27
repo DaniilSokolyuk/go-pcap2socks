@@ -21,11 +21,11 @@ build:
 # Platform-specific builds
 .PHONY: build-linux-amd64
 build-linux-amd64:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-linux-amd64 .
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-linux-amd64 .
 
 .PHONY: build-linux-arm64
 build-linux-arm64:
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-linux-arm64 .
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-linux-arm64 .
 
 .PHONY: build-darwin-arm64
 build-darwin-arm64:

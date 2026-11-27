@@ -2,7 +2,9 @@ package device
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -47,7 +49,7 @@ var _ Device = (*ethDevice)(nil)
 
 const offset = 0
 
-// Open captures on the given interface with a live pcap handle.
+// Open captures on the given interface.
 func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig) (_ Device, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -55,12 +57,12 @@ func Open(captureCfg cfg.Capture, ifce net.Interface, netConfig *NetworkConfig) 
 		}
 	}()
 
-	src, err := newPcapSource(ifce, netConfig)
+	src, typ, err := newLiveSource(ifce, netConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	dev, err := OpenWithSource(captureCfg, src, "pcap", netConfig)
+	dev, err := OpenWithSource(captureCfg, src, typ, netConfig)
 	if err != nil {
 		_ = src.Close()
 		return nil, err
@@ -89,6 +91,9 @@ func OpenWithSource(captureCfg cfg.Capture, src FrameSource, typ string, netConf
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
 
+	if offloader, ok := src.(ChecksumOffloader); ok && offloader.RXChecksumOffload() {
+		ep.SetRXChecksumOffload()
+	}
 	t.ep = ep
 
 	// we are in L2 and using ethernet header
@@ -194,6 +199,23 @@ func (t *ethDevice) Write(p []byte) (n int, err error) {
 	}
 
 	return len(p), nil
+}
+
+// WriteFrames sends a batch of frames, in one call when the source supports
+// it.
+func (t *ethDevice) WriteFrames(frames [][]byte) error {
+	if bw, ok := t.src.(BatchWriter); ok {
+		// The outbound loop can still be flushing a batch while the source
+		// is being closed; that is not worth an error in the log.
+		if err := bw.WriteFrames(frames); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+			slog.Error("write packets error", slog.Any("err", err))
+		}
+		return nil
+	}
+	for _, frame := range frames {
+		_, _ = t.Write(frame)
+	}
+	return nil
 }
 
 func (t *ethDevice) Name() string {
