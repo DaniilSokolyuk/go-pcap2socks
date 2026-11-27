@@ -82,6 +82,13 @@ topology() {
   ip netns exec wire ethtool -K wl $off >/dev/null
   ip netns exec wire ethtool -K wc $off >/dev/null
 
+  # LAN_GRO=1 turns receive offload back on for the PC's interface, which is
+  # how a physical NIC runs by default: the kernel merges TCP segments before
+  # a packet socket sees them.
+  if [ -n "${LAN_GRO:-}" ]; then
+    ethtool -K lan0 gro on >/dev/null
+  fi
+
   sysctl -qw net.ipv4.ip_forward=0
   ip netns exec wan iperf3 -s -B 203.0.113.10 -D >/dev/null
 }

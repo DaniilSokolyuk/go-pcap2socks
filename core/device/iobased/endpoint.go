@@ -139,6 +139,12 @@ func New(rw ReadWriter, mtu uint32, offset int, mac net.HardwareAddr) (*Endpoint
 	}, nil
 }
 
+// SetRXChecksumOffload tells the stack not to verify transport checksums of
+// inbound packets. It must be called before the endpoint is attached.
+func (e *Endpoint) SetRXChecksumOffload() {
+	e.Endpoint.LinkEPCapabilities |= stack.CapabilityRXChecksumOffload
+}
+
 // Attach launches the goroutine that reads packets from io.Reader and
 // dispatches them via the provided dispatcher.
 func (e *Endpoint) Attach(dispatcher stack.NetworkDispatcher) {

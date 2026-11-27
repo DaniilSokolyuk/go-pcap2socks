@@ -11,7 +11,7 @@ repo=$(cd "$here/../.." && pwd)
 
 docker build -q -t pcap2socks-netbench "$here" >/dev/null
 docker run --rm --privileged \
-  -e DURATION -e VARIANTS -e PROFILES -e DEBUG_QDISC -e PROFILE -e PROFILE_NODES \
+  -e DURATION -e VARIANTS -e PROFILES -e DEBUG_QDISC -e PROFILE -e PROFILE_NODES -e LAN_GRO \
   -v "$repo":/src:ro \
   -v pcap2socks-netbench-gomod:/go/pkg/mod \
   -v pcap2socks-netbench-gocache:/root/.cache/go-build \

@@ -91,6 +91,9 @@ func OpenWithSource(captureCfg cfg.Capture, src FrameSource, typ string, netConf
 		return nil, fmt.Errorf("create endpoint: %w", err)
 	}
 
+	if offloader, ok := src.(ChecksumOffloader); ok && offloader.RXChecksumOffload() {
+		ep.SetRXChecksumOffload()
+	}
 	t.ep = ep
 
 	// we are in L2 and using ethernet header

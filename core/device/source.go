@@ -31,6 +31,14 @@ type BatchWriter interface {
 	WriteFrames(frames [][]byte) error
 }
 
+// ChecksumOffloader is an optional extension of FrameSource. A source whose
+// frames may carry transport checksums that are not valid on their own - the
+// kernel merged several packets into one - says so, and the stack then leaves
+// them unverified.
+type ChecksumOffloader interface {
+	RXChecksumOffload() bool
+}
+
 // frameSender is how a live source sends a batch of frames in fewer calls than
 // one per frame: sendmmsg on Linux, an Npcap send queue on Windows.
 type frameSender interface {
