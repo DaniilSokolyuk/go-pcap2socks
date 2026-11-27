@@ -54,6 +54,8 @@ type Endpoint struct {
 	// underlying source can no longer be read from.
 	done chan struct{}
 
+	// writeMu serialises WritePackets, see there.
+	writeMu sync.Mutex
 	// dropped counts outbound packets discarded because the queue was full.
 	dropped atomic.Uint64
 	// slowestWrite is the longest a single write to the source has taken.
@@ -85,7 +87,16 @@ func (e *Endpoint) TxStats() TxStats {
 // longest is the one worth least, and for TCP losing the head of the queue
 // is noticed a queue length sooner than losing the tail.
 func (e *Endpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error) {
-	for excess := e.NumQueued() + pkts.Len() - defaultOutQueueLen; excess > 0; excess-- {
+	// The stack calls this from many goroutines. Without the lock two of
+	// them could each find room for their own packets and overflow together,
+	// and the queue would then refuse the newest packets without a trace.
+	e.writeMu.Lock()
+	defer e.writeMu.Unlock()
+
+	// The room is rechecked every time round: the outbound loop is draining
+	// the queue meanwhile, and nothing should be discarded that would have
+	// fitted anyway.
+	for e.NumQueued()+pkts.Len() > defaultOutQueueLen {
 		oldest := e.Endpoint.Read()
 		if oldest == nil {
 			break
@@ -93,7 +104,12 @@ func (e *Endpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error) 
 		oldest.DecRef()
 		e.dropped.Add(1)
 	}
-	return e.Endpoint.WritePackets(pkts)
+
+	n, err := e.Endpoint.WritePackets(pkts)
+	if short := pkts.Len() - n; short > 0 {
+		e.dropped.Add(uint64(short))
+	}
+	return n, err
 }
 
 // New returns stack.LinkEndpoint(.*Endpoint) and error.
@@ -193,18 +209,6 @@ func (e *Endpoint) dispatchLoop(cancel context.CancelFunc) {
 // outboundLoop reads outbound packets from channel, and then it calls
 // writePacket to send those packets back to lower layer.
 func (e *Endpoint) outboundLoop(ctx context.Context) {
-	bw, batching := e.rw.(BatchWriter)
-	if !batching {
-		for {
-			pkt := e.ReadContext(ctx)
-			if pkt == nil {
-				break
-			}
-			e.writePacket(pkt)
-		}
-		return
-	}
-
 	views := make([]*buffer.View, 0, maxWriteBatch)
 	frames := make([][]byte, 0, maxWriteBatch)
 	var (
@@ -231,7 +235,7 @@ func (e *Endpoint) outboundLoop(ctx context.Context) {
 		}
 
 		start := time.Now()
-		_ = bw.WriteFrames(frames)
+		_ = e.rw.WriteFrames(frames)
 		took := time.Since(start)
 
 		// A write that takes longer than any before it is the first sign of a
@@ -256,30 +260,14 @@ func (e *Endpoint) outboundLoop(ctx context.Context) {
 	}
 }
 
-// writePacket writes outbound packets to the io.Writer.
-func (e *Endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
-	defer pkt.DecRef()
-
-	view := pkt.ToView()
-	defer view.Release()
-	_, err := view.WriteTo(e.rw)
-	if err != nil {
-		return &tcpip.ErrInvalidEndpointState{}
-	}
-	return nil
-}
-
-// BatchWriter is an optional extension of ReadWriter. When the device
-// implements it, the outbound loop sends queued packets in batches.
-type BatchWriter interface {
-	WriteFrames(frames [][]byte) error
-}
-
+// ReadWriter is the device under the endpoint.
 type ReadWriter interface {
-	io.Writer
-
 	// Read returns the next inbound frame. A nil frame with a nil error means
 	// the frame was dropped and reading should continue; a non-nil error
 	// terminates the dispatch loop.
 	Read() ([]byte, error)
+
+	// WriteFrames sends a batch of outbound frames, in order. The device must
+	// not retain them.
+	WriteFrames(frames [][]byte) error
 }

@@ -1,7 +1,9 @@
 package device
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"unsafe"
@@ -49,6 +51,17 @@ func (s *packetSender) send(frames [][]byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// The outbound loop can outlive Close by a batch. The descriptor number
+	// may belong to another socket by then, so it must never be used again.
+	if s.fd < 0 {
+		return io.ErrClosedPipe
+	}
+	// Do not keep the caller's buffers reachable until the next batch.
+	defer func() {
+		clear(s.iovs)
+		clear(s.msgs)
+	}()
+
 	for len(frames) > 0 {
 		n := min(len(frames), senderBatch)
 		for i, frame := range frames[:n] {
@@ -67,16 +80,22 @@ func (s *packetSender) send(frames [][]byte) error {
 		sent, _, errno := unix.Syscall6(unix.SYS_SENDMMSG,
 			uintptr(s.fd), uintptr(unsafe.Pointer(&s.msgs[0])), uintptr(n), 0, 0, 0)
 		switch {
-		case errno == unix.EINTR || errno == unix.EAGAIN:
+		case errno == unix.EINTR:
 			continue
-		case errno == unix.ENOBUFS || errno == unix.EMSGSIZE || errno == unix.EINVAL:
-			// This frame cannot be sent: the device queue is full, or the
-			// frame is oversized or shorter than an ethernet header. Drop it,
-			// as the wire would, and carry on with the rest.
+		case errno == unix.ENOBUFS || errno == unix.EAGAIN:
+			// The device queue is full. Retrying frame by frame would cost a
+			// system call each to learn the same thing, so the rest of the
+			// batch is lost, as it would be on a saturated wire.
+			return nil
+		case errno == unix.EMSGSIZE || errno == unix.EINVAL:
+			// This one frame cannot be sent: oversized, or shorter than an
+			// ethernet header. Drop it and carry on with the rest.
 			frames = frames[1:]
 			continue
 		case errno != 0:
 			return fmt.Errorf("sendmmsg: %w", errno)
+		case sent == 0:
+			return errors.New("sendmmsg made no progress")
 		}
 		frames = frames[sent:]
 	}
@@ -86,5 +105,10 @@ func (s *packetSender) send(frames [][]byte) error {
 func (s *packetSender) close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return unix.Close(s.fd)
+	if s.fd < 0 {
+		return nil
+	}
+	fd := s.fd
+	s.fd = -1
+	return unix.Close(fd)
 }

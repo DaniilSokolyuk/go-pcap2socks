@@ -2,7 +2,9 @@ package device
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -200,7 +202,9 @@ func (t *ethDevice) Write(p []byte) (n int, err error) {
 // it.
 func (t *ethDevice) WriteFrames(frames [][]byte) error {
 	if bw, ok := t.src.(BatchWriter); ok {
-		if err := bw.WriteFrames(frames); err != nil {
+		// The outbound loop can still be flushing a batch while the source
+		// is being closed; that is not worth an error in the log.
+		if err := bw.WriteFrames(frames); err != nil && !errors.Is(err, io.ErrClosedPipe) {
 			slog.Error("write packets error", slog.Any("err", err))
 		}
 		return nil
